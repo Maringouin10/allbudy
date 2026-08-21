@@ -104,7 +104,7 @@ cd allbudy
 docker compose up -d
 ```
 
-L'interface est sur `http://<adresse-du-serveur>:8080` — identifiants par défaut
+L'interface est sur `http://<adresse-du-serveur>:8088` — identifiants par défaut
 `admin` / `allbudy`, **à changer dès la première connexion** (Réglages → Compte).
 
 > **Découverte réseau et Docker.** En mode `bridge` (le défaut), le conteneur ne voit
@@ -214,7 +214,7 @@ Tout passe par des variables d'environnement préfixées `ALLBUDY_` (ou un fichi
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `ALLBUDY_PORT` | `8080` | Port d'écoute |
+| `ALLBUDY_PORT` | `8088` | Port d'écoute |
 | `ALLBUDY_DATA_DIR` | `./data` | Base, fichiers, miniatures, clé secrète |
 | `ALLBUDY_AUTH_ENABLED` | `true` | Mettre à `false` sur un réseau déjà cloisonné |
 | `ALLBUDY_ADMIN_PASSWORD` | `allbudy` | Mot de passe initial (premier démarrage seulement) |
@@ -233,24 +233,24 @@ fichier avec la base** : sans lui, ces mots de passe sont irrécupérables.
 ## API
 
 Toute l'interface repose sur une API REST documentée automatiquement :
-`http://<serveur>:8080/docs`.
+`http://<serveur>:8088/docs`.
 
 ```bash
 # Connexion
-TOKEN=$(curl -s -X POST localhost:8080/api/auth/login \
+TOKEN=$(curl -s -X POST localhost:8088/api/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"allbudy"}' | jq -r .access_token)
 
 # Envoyer un fichier et le mettre en file
-FILE_ID=$(curl -s -X POST localhost:8080/api/files \
+FILE_ID=$(curl -s -X POST localhost:8088/api/files \
   -H "Authorization: Bearer $TOKEN" -F file=@piece.gcode | jq .file.id)
 
-curl -s -X POST localhost:8080/api/jobs \
+curl -s -X POST localhost:8088/api/jobs \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d "{\"file_id\": $FILE_ID, \"required_material\": \"PLA\", \"required_color\": \"#E74C3C\"}"
 
 # État du parc
-curl -s localhost:8080/api/printers/status -H "Authorization: Bearer $TOKEN"
+curl -s localhost:8088/api/printers/status -H "Authorization: Bearer $TOKEN"
 ```
 
 Le WebSocket `/ws` pousse l'état des imprimantes et les événements ; il envoie un

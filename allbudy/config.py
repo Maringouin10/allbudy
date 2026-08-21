@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # --- Serveur HTTP ---
     host: str = "0.0.0.0"
-    port: int = 8080
+    port: int = 8088
     base_path: str = ""
     """Prefixe si l'app est servie derriere un reverse proxy (ex: /allbudy)."""
 

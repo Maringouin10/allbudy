@@ -13,7 +13,7 @@ services:
     #     pouvez ajouter les imprimantes a la main par leur adresse IP.
     # network_mode: host
     ports:
-      - "8080:8080"
+      - "8088:8088"
 
     volumes:
       - allbudy-data:/data

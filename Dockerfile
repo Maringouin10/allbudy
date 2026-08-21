@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     ALLBUDY_DATA_DIR=/data \
     ALLBUDY_HOST=0.0.0.0 \
-    ALLBUDY_PORT=8080
+    ALLBUDY_PORT=8088
 
 WORKDIR /app
 
@@ -28,9 +28,9 @@ RUN useradd --system --create-home --uid 10001 allbudy \
 USER allbudy
 
 VOLUME ["/data"]
-EXPOSE 8080
+EXPOSE 8088
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8080/api/system/health || exit 1
+    CMD curl -fsS http://127.0.0.1:8088/api/system/health || exit 1
 
 CMD ["python", "-m", "allbudy.main"]
