@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Donnees d'execution (base, fichiers tranches, miniatures, cle secrete)
+/data/
+*.db
+*.db-wal
+*.db-shm
+secret.key
+samples/
+
+# Environnement local
+.env
+
+# Editeurs / OS
+.vscode/
+.idea/
+.DS_Store

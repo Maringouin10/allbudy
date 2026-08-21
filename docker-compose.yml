@@ -1,0 +1,33 @@
+services:
+  allbudy:
+    build: .
+    image: allbudy:latest
+    container_name: allbudy
+    restart: unless-stopped
+
+    # La decouverte reseau balaie le sous-reseau local: en mode "bridge", le
+    # conteneur ne voit que le reseau Docker. Deux options:
+    #   - host (recommande sur Linux / Raspberry Pi): decommentez la ligne
+    #     network_mode et commentez le bloc "ports";
+    #   - bridge: la decouverte automatique ne fonctionnera pas, mais vous
+    #     pouvez ajouter les imprimantes a la main par leur adresse IP.
+    # network_mode: host
+    ports:
+      - "8080:8080"
+
+    volumes:
+      - allbudy-data:/data
+
+    environment:
+      # Identifiants du premier demarrage (a changer depuis l'interface ensuite).
+      ALLBUDY_ADMIN_USERNAME: admin
+      ALLBUDY_ADMIN_PASSWORD: allbudy
+      # Rythme d'interrogation des machines, en secondes.
+      ALLBUDY_POLL_INTERVAL: "2.0"
+      ALLBUDY_MAX_UPLOAD_MB: "512"
+      ALLBUDY_LOG_LEVEL: INFO
+      # Imprimantes simulees creees au premier demarrage (0 = aucune).
+      ALLBUDY_DEMO_PRINTERS: "0"
+
+volumes:
+  allbudy-data:
