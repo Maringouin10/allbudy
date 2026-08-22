@@ -43,7 +43,7 @@ from .base import (
     RemoteFile,
     SpoolState,
 )
-from .parsing import as_float, as_int, parse_cfs_payload
+from .parsing import as_float, as_int, parse_cfs_payload, parse_creality_box_payload
 
 log = logging.getLogger("allbudy.creality_lan")
 
@@ -328,7 +328,7 @@ class CrealityLanTransport(PrinterTransport):
                     payload = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
-            spools = parse_cfs_payload(payload)
+            spools = parse_cfs_payload(payload) or parse_creality_box_payload(payload)
             if spools:
                 if not self._cfs_logged:
                     log.info("%s: CFS detecte via le champ '%s'", self.config.name, key)

@@ -14,7 +14,7 @@ from allbudy.printers.base import (
 )
 from allbudy.printers.creality_lan import CrealityLanTransport
 from allbudy.printers.moonraker import MoonrakerTransport
-from allbudy.printers.parsing import normalize_color, parse_cfs_payload
+from allbudy.printers.parsing import normalize_color, parse_cfs_payload, parse_creality_box_payload
 from allbudy.printers.simulator import SimulatorTransport
 
 
@@ -75,6 +75,104 @@ def test_parse_cfs_charge_utile_invalide():
     assert parse_cfs_payload(None) == []
     assert parse_cfs_payload({"boxs": "pas une liste"}) == []
     assert parse_cfs_payload({"boxs": [{"materials": ["chaine inattendue"]}]}) == []
+
+
+# ------------------------------------------------- CFS Creality (box K2/K1 Max)
+#: Charge utile reelle d'un K2 Plus (journal utilisateur), tronquee des champs
+#: sans effet sur le parsing (uuid, measuring_wheel, sn...). Boitier T1 seul
+#: present; T2-T4 sont des emplacements physiques absents (state "None").
+_REAL_BOX_PAYLOAD = {
+    "filament": 1,
+    "state": "connect",
+    "auto_refill": 1,
+    "enable": 1,
+    "filament_useup": 0,
+    "same_material": [
+        ["101001", "0C12E1F", ["T1B", "T1D"], "PLA"],
+        ["101001", "0FFFFFF", ["T1C"], "PLA"],
+    ],
+    "T1": {
+        "state": "connect",
+        "filament": "B",
+        "vender": [
+            "none",
+            "CC0240276A21010010C12E1F0330000001000000",
+            "9C6250276A21010010FFFFFF0330000001000000",
+            "BA1250276A21010010C12E1F0330000001000000",
+        ],
+        "remain_len": ["0", "9", "96", "54"],
+        "color_value": ["0C12E1F", "0C12E1F", "0FFFFFF", "0C12E1F"],
+        "material_type": ["101001", "101001", "101001", "101001"],
+    },
+    "T2": {"state": "None", "filament": "None", "vender": ["-1", "-1", "-1", "-1"]},
+    "T3": {"state": "None", "filament": "None", "vender": ["-1", "-1", "-1", "-1"]},
+    "T4": {"state": "None", "filament": "None", "vender": ["-1", "-1", "-1", "-1"]},
+}
+
+
+def test_parse_creality_box_payload_reel():
+    """Rejoue la charge utile exacte d'un K2 Plus rapportee par un utilisateur."""
+    spools = parse_creality_box_payload(_REAL_BOX_PAYLOAD)
+    # Seul T1 est physiquement present: 4 emplacements, pas 16.
+    assert len(spools) == 4
+    assert {s.unit for s in spools} == {1}
+
+    by_slot = {s.slot: s for s in spools}
+    assert by_slot[0].empty is True and by_slot[0].material == "vide"
+
+    assert by_slot[1].material == "PLA"
+    assert by_slot[1].color_hex == "#C12E1F"
+    assert by_slot[1].remaining_pct == 9.0
+    assert by_slot[1].empty is False
+    # Boitier actif (filament=1) et lettre active (B) du boitier T1: slot B seul actif.
+    assert by_slot[1].active is True
+
+    assert by_slot[2].material == "PLA"
+    assert by_slot[2].color_hex == "#FFFFFF"
+    assert by_slot[2].remaining_pct == 96.0
+    assert by_slot[2].active is False
+
+    assert by_slot[3].material == "PLA"
+    assert by_slot[3].color_hex == "#C12E1F"
+    assert by_slot[3].remaining_pct == 54.0
+    assert by_slot[3].active is False
+
+
+def test_parse_creality_box_payload_boitier_sans_same_material():
+    """Un emplacement occupe sans correspondance dans same_material reste visible.
+
+    Un boitier compte toujours 4 emplacements physiques (A-D); seul le
+    premier est documente ici, les trois autres sont donc vides par defaut.
+    """
+    payload = {
+        "filament": 1,
+        "T1": {
+            "state": "connect",
+            "filament": "None",
+            "vender": ["TAG123"],
+            "remain_len": ["42"],
+            "color_value": ["0AABBCC"],
+            "material_type": ["999999"],
+        },
+    }
+    spools = parse_creality_box_payload(payload)
+    assert len(spools) == 4
+    slot_a = next(s for s in spools if s.slot == 0)
+    assert slot_a.empty is False
+    assert slot_a.material == "materiau 999999"
+    assert slot_a.color_hex == "#AABBCC"
+    assert all(s.empty for s in spools if s.slot != 0)
+
+
+def test_parse_creality_box_payload_ignore_les_boitiers_absents():
+    payload = {"T1": {"state": "None"}, "T2": {"state": "None"}}
+    assert parse_creality_box_payload(payload) == []
+
+
+def test_parse_creality_box_payload_charge_utile_invalide():
+    assert parse_creality_box_payload(None) == []
+    assert parse_creality_box_payload({}) == []
+    assert parse_creality_box_payload({"T1": "pas un dict"}) == []
 
 
 # ------------------------------------------------------------- Moonraker
@@ -212,6 +310,18 @@ def test_moonraker_cfs_objet_trouve_mais_illisible_journalise_le_brut(caplog):
         "aucun emplacement reconnu" in message and "unexpected_shape" in message
         for message in caplog.messages
     )
+
+
+def test_moonraker_parse_cfs_via_le_format_box_reel():
+    """Bout en bout: l'objet 'box' d'un vrai K2 Plus doit produire les 4 emplacements."""
+    transport = MoonrakerTransport(config())
+    transport._available = ["box"]
+    transport._detect_objects()
+    assert transport._cfs_key == "box"
+    transport._objects = {"box": _REAL_BOX_PAYLOAD}
+    spools = transport._parse_cfs()
+    assert len(spools) == 4
+    assert any(s.material == "PLA" and not s.empty for s in spools)
 
 
 def test_moonraker_detection_chambre_par_heuristique():

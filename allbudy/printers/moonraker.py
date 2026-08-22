@@ -36,7 +36,7 @@ from .base import (
     SpoolState,
 )
 from .parsing import as_float as _as_float
-from .parsing import parse_cfs_payload
+from .parsing import parse_cfs_payload, parse_creality_box_payload
 
 log = logging.getLogger("allbudy.moonraker")
 
@@ -485,7 +485,7 @@ class MoonrakerTransport(PrinterTransport):
         if not self._cfs_key:
             return []
         payload = self._objects.get(self._cfs_key)
-        spools = parse_cfs_payload(payload)
+        spools = parse_cfs_payload(payload) or parse_creality_box_payload(payload)
         if not spools and not self._cfs_payload_logged:
             # L'objet existe mais sa structure n'est reconnue par aucun des
             # formats geres: le contenu brut est indispensable pour ajouter
