@@ -3,8 +3,8 @@ import { api, apiUrl } from '../api.js';
 import { materialChip, printerIcon } from '../components.js';
 import { printerState } from '../store.js';
 import {
-  badge, clear, confirmDialog, el, emptyState, field, formatBytes, formatDate, formatDuration,
-  modal, run, toast, toastError,
+  badge, clear, colorSelect, confirmDialog, el, emptyState, field, formatBytes, formatDate,
+  formatDuration, modal, run, toast, toastError,
 } from '../ui.js';
 
 function fileMetaLines(file) {
@@ -359,36 +359,6 @@ function colorSlotField(index, total, meta, inventory, spoolById) {
   const fileMaterial = (meta.filament_types || [])[index] || '';
   const fileColor = (meta.filament_colors || [])[index] || null;
 
-  // Pastille de previsualisation: on choisit une bobine par sa couleur, pas
-  // par son code hexadecimal — inutile de savoir lire un #RRGGBB.
-  const dot = el('span', {
-    style: `display:inline-block;width:22px;height:22px;border-radius:6px;flex:none;background:${fileColor || '#7f8c8d'};border:1px solid rgba(255,255,255,.3)`,
-  });
-
-  const select = el('select', {}, [
-    el('option', {
-      value: 'auto',
-      style: fileColor ? `background:${fileColor}` : null,
-      text: `Auto — ${fileMaterial || 'matiere du fichier'}${fileColor ? ' (couleur du fichier)' : ''}`,
-    }),
-    el('option', { value: 'manual', text: 'Saisie manuelle...' }),
-  ]);
-  for (const group of inventory) {
-    const usable = (group.spools || []).filter((s) => !s.empty);
-    if (!usable.length) continue;
-    const optgroup = el('optgroup', { label: group.printer });
-    for (const spool of usable) {
-      const key = `spool-${spool.id}`;
-      spoolById.set(key, { material: spool.material, color: spool.color_hex });
-      optgroup.append(el('option', {
-        value: key,
-        style: `background:${spool.color_hex}`,
-        text: `${spool.material} · ${spool.color_name || spool.color_hex}${spool.vendor ? ` · ${spool.vendor}` : ''}`,
-      }));
-    }
-    select.append(optgroup);
-  }
-
   const manualMaterial = el('input', { value: fileMaterial, placeholder: 'PLA, PETG, ABS...' });
   const manualColor = el('input', { type: 'color', value: fileColor || '#7f8c8d' });
   const manualRow = el('div', { class: 'row', style: 'margin-top:.35rem;display:none' }, [
@@ -396,36 +366,61 @@ function colorSlotField(index, total, meta, inventory, spoolById) {
     manualColor,
   ]);
 
-  const updatePreview = () => {
-    if (select.value === 'auto') dot.style.background = fileColor || '#7f8c8d';
-    else if (select.value === 'manual') dot.style.background = manualColor.value;
-    else dot.style.background = (spoolById.get(select.value) || {}).color || '#7f8c8d';
-  };
-  select.addEventListener('change', () => {
-    manualRow.style.display = select.value === 'manual' ? 'flex' : 'none';
-    updatePreview();
+  const options = [
+    {
+      value: 'auto',
+      color: fileColor || '#7f8c8d',
+      label: `Auto — ${fileMaterial || 'matiere du fichier'}${fileColor ? ' (couleur du fichier)' : ''}`,
+    },
+    { value: 'manual', color: manualColor.value, label: 'Saisie manuelle...' },
+  ];
+  for (const group of inventory) {
+    const usable = (group.spools || []).filter((s) => !s.empty);
+    if (!usable.length) continue;
+    options.push({ group: group.printer });
+    for (const spool of usable) {
+      const key = `spool-${spool.id}`;
+      spoolById.set(key, { material: spool.material, color: spool.color_hex });
+      options.push({
+        value: key,
+        color: spool.color_hex,
+        label: `${spool.material} · ${spool.color_name || spool.color_hex}${spool.vendor ? ` · ${spool.vendor}` : ''}`,
+      });
+    }
+  }
+
+  const manualOption = options[1];
+  const picker = colorSelect({
+    options,
+    value: 'auto',
+    onChange: (value) => {
+      manualRow.style.display = value === 'manual' ? 'flex' : 'none';
+    },
   });
-  manualColor.addEventListener('input', updatePreview);
+
+  manualColor.addEventListener('input', () => {
+    manualOption.color = manualColor.value;
+    if (picker.value === 'manual') picker.value = 'manual';
+  });
 
   const node = el('div', {}, [
     el('div', { class: 'row', style: 'gap:.5rem;flex-wrap:nowrap' }, [
-      dot,
       el('span', { class: 'small nowrap', style: 'min-width:80px', text: total > 1 ? `Couleur ${index + 1}` : 'Bobine' }),
       el('span', { class: 'small muted nowrap', text: fileMaterial || '?' }),
       el('span', { class: 'small muted', text: '→' }),
-      el('div', { style: 'flex:1;min-width:0' }, [select]),
+      el('div', { style: 'flex:1;min-width:0' }, [picker.node]),
     ]),
     manualRow,
   ]);
 
   const read = () => {
-    if (select.value === 'auto') return null;
-    if (select.value === 'manual') {
+    if (picker.value === 'auto') return null;
+    if (picker.value === 'manual') {
       const material = manualMaterial.value.trim();
       const colorValue = manualColor.value;
       return material || colorValue ? { material: material || null, color: colorValue || null } : null;
     }
-    return spoolById.get(select.value) || null;
+    return spoolById.get(picker.value) || null;
   };
 
   return { node, read };

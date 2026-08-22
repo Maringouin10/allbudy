@@ -193,6 +193,82 @@ export function confirmDialog(message, onConfirm, { submitLabel = 'Confirmer' } 
   });
 }
 
+/**
+ * Selecteur avec une pastille de couleur par option, pour choisir par la
+ * teinte plutot que par un code #RRGGBB (un <select> natif ne colore pas ses
+ * <option> de facon fiable selon les navigateurs).
+ *
+ * `options`: liste ordonnee de `{value, label, color}` (une entree
+ * `{group: "titre"}` sans `value` insere un intertitre non cliquable, pour
+ * grouper comme le ferait un <optgroup>).
+ */
+export function colorSelect({ options, value, onChange, placeholder = 'Choisir...' }) {
+  let current = value;
+  const findOption = (val) => options.find((o) => o.value === val && !o.group);
+
+  const trigger = el('button', { type: 'button', class: 'color-select-trigger' });
+  const menu = el('div', { class: 'color-select-menu' });
+  const root = el('div', { class: 'color-select' }, [trigger, menu]);
+
+  function renderTrigger() {
+    const opt = findOption(current);
+    clear(trigger).append(
+      el('span', { class: 'color-select-swatch', style: `background:${(opt && opt.color) || 'transparent'}` }),
+      el('span', { class: 'color-select-label truncate', text: opt ? opt.label : placeholder }),
+      el('span', { class: 'color-select-caret', text: '▾' }),
+    );
+  }
+
+  function onOutside(event) {
+    if (!root.contains(event.target)) close();
+  }
+
+  function close() {
+    menu.classList.remove('open');
+    document.removeEventListener('mousedown', onOutside);
+  }
+
+  function toggle() {
+    if (menu.classList.contains('open')) { close(); return; }
+    menu.classList.add('open');
+    document.addEventListener('mousedown', onOutside);
+  }
+
+  function renderMenu() {
+    clear(menu);
+    for (const opt of options) {
+      if (opt.group) {
+        menu.append(el('div', { class: 'color-select-group', text: opt.group }));
+        continue;
+      }
+      menu.append(el('button', {
+        type: 'button',
+        class: `color-select-item${opt.value === current ? ' selected' : ''}`,
+        onClick: () => {
+          current = opt.value;
+          renderTrigger();
+          renderMenu();
+          close();
+          onChange(current);
+        },
+      }, [
+        el('span', { class: 'color-select-swatch', style: `background:${opt.color || 'transparent'}` }),
+        el('span', { class: 'truncate', text: opt.label }),
+      ]));
+    }
+  }
+
+  trigger.addEventListener('click', toggle);
+  renderTrigger();
+  renderMenu();
+
+  return {
+    node: root,
+    get value() { return current; },
+    set value(next) { current = next; renderTrigger(); renderMenu(); },
+  };
+}
+
 /** Champ de formulaire etiquete. */
 export function field(label, input, hint) {
   return el('div', { class: 'field' }, [
