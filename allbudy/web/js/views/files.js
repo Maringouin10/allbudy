@@ -532,8 +532,12 @@ export function printModal(file, onDone) {
     );
 
     // Sans modele fiable (fichier ambigu, parc heterogene), on montre tout
-    // plutot que de filtrer sur une devinette potentiellement fausse.
-    const group = showAllModels || !model ? printers : printers.filter((p) => p.model === model);
+    // plutot que de filtrer sur une devinette potentiellement fausse. Le
+    // matching automatique ne choisit jamais une virtuelle de lui-meme
+    // (voir matcher.py): en mode « N'importe laquelle » elle n'a donc rien
+    // a faire dans la liste, seul un ciblage explicite l'autorise.
+    const group = (showAllModels || !model ? printers : printers.filter((p) => p.model === model))
+      .filter((p) => targetMode === 'specific' || p.transport !== 'virtual');
     const hidden = printers.length - group.length;
 
     clear(printerBox);

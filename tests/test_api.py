@@ -1,9 +1,11 @@
 """Tests d'integration de l'API, du televersement a la fin d'impression."""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
-from tests.conftest import wait_until
+from tests.conftest import _connected, wait_until
 from tests.sample_data import make_3mf, make_gcode
 
 pytestmark = pytest.mark.asyncio
@@ -120,8 +122,13 @@ async def test_crud_imprimante(client):
     assert created.status_code == 201
     printer = created.json()
 
-    listed = await client.get("/api/printers")
-    assert [p["id"] for p in listed.json()] == [printer["id"]]
+    # Une imprimante virtuelle "K1 (virtuelle)" est creee automatiquement pour
+    # le meme modele (voir sync_virtual_printers): la liste en contient deux.
+    listed = (await client.get("/api/printers")).json()
+    reels = [p for p in listed if p["transport"] != "virtual"]
+    virtuelles = [p for p in listed if p["transport"] == "virtual"]
+    assert [p["id"] for p in reels] == [printer["id"]]
+    assert [v["model"] for v in virtuelles] == ["K1"]
 
     patched = await client.patch(
         f"/api/printers/{printer['id']}", json={"nozzle_diameter": 0.6, "tags": ["abs"]}
@@ -136,7 +143,9 @@ async def test_crud_imprimante(client):
 
     deleted = await client.delete(f"/api/printers/{printer['id']}")
     assert deleted.status_code == 200
-    assert (await client.get("/api/printers")).json() == []
+    # La virtuelle associee n'est jamais supprimee automatiquement.
+    remaining = (await client.get("/api/printers")).json()
+    assert [p["transport"] for p in remaining] == ["virtual"]
 
 
 async def test_port_par_defaut_selon_protocole(client):
@@ -259,6 +268,109 @@ async def test_cycle_complet_du_travail(client, simulator):
     assert done["finished_at"]
 
 
+async def test_plateau_non_vide_bloque_le_travail_suivant(client, simulator):
+    """Le plateau doit etre confirme vide avant qu'un 2e travail ne parte."""
+    from allbudy.printers.manager import manager
+
+    file = await upload_gcode(client, "cube.gcode", material="PLA", color="#E74C3C")
+    await wait_until(lambda: _inventory_ready(client, simulator["id"]), timeout=10)
+
+    runtime = manager.get(simulator["id"])
+    runtime.transport.set_print_duration(3)
+
+    first = (await client.post("/api/jobs", json={"file_id": file["id"]})).json()
+    await wait_until(lambda: _job_status(client, first["id"], {"completed"}), timeout=25)
+
+    printer = (await client.get(f"/api/printers/{simulator['id']}")).json()
+    assert printer["bed_cleared"] is False
+
+    second = (await client.post("/api/jobs", json={"file_id": file["id"]})).json()
+    # Le plateau n'est pas confirme vide: le 2e travail reste en file quelques
+    # cycles du dispatcher, jamais attribue.
+    await asyncio.sleep(1)
+    stuck = (await client.get(f"/api/jobs/{second['id']}")).json()
+    assert stuck["status"] == "queued"
+    assert stuck["printer_id"] is None
+
+    cleared = await client.patch(f"/api/printers/{simulator['id']}", json={"bed_cleared": True})
+    assert cleared.json()["bed_cleared"] is True
+
+    await wait_until(lambda: _job_status(client, second["id"], {"printing", "sending", "completed"}), timeout=15)
+
+
+async def test_imprimante_virtuelle_flux_complet(client, monkeypatch):
+    """Imprimer -> envoi NAS -> demarrage confirme -> fin confirmee -> plateau a confirmer."""
+    import sys
+
+    # `allbudy.queueing.scheduler` (attribut de paquet) est le singleton
+    # JobScheduler, pas le module: `allbudy/queueing/__init__.py` reexporte
+    # l'instance sous le meme nom. Le vrai module s'obtient via sys.modules.
+    scheduler_module = sys.modules["allbudy.queueing.scheduler"]
+
+    uploads = []
+
+    async def fake_upload_remote(storage, path, remote_path):
+        uploads.append((storage.name, remote_path))
+
+    monkeypatch.setattr(scheduler_module, "upload_remote", fake_upload_remote)
+
+    real = (await client.post("/api/printers", json={
+        "name": "K1C reel", "model": "K1C", "transport": "simulator", "host": "sim", "port": 0,
+    })).json()
+
+    printers = (await client.get("/api/printers")).json()
+    virtual = next(p for p in printers if p["transport"] == "virtual" and p["model"] == "K1C")
+    assert virtual["id"] != real["id"]
+    await wait_until(lambda: _connected(virtual["id"]), timeout=10)
+
+    storage = (await client.post("/api/storage", json={
+        "name": "nas-virtuel", "kind": "sftp", "host": "nas.local", "remote_path": "/gcode",
+    })).json()
+    patched = await client.patch(
+        f"/api/printers/{virtual['id']}", json={"virtual_target_storage_id": storage["id"]}
+    )
+    assert patched.json()["virtual_target_storage_id"] == storage["id"]
+
+    # La virtuelle n'a pas de CFS: on declare la bobine nominalement chargee,
+    # comme pour toute machine sans systeme de changement automatique.
+    spool = await client.post("/api/spools", json={
+        "printer_id": virtual["id"], "unit": -1, "slot": 0,
+        "material": "PLA", "color_hex": "#FF0000", "active": True,
+    })
+    assert spool.status_code == 201
+
+    file = await upload_gcode(client, "virtuel.gcode")
+    job = (
+        await client.post(
+            "/api/jobs", json={"file_id": file["id"], "printer_id": virtual["id"]}
+        )
+    ).json()
+
+    # Le fichier part sur le depot NAS configure, pas sur une machine.
+    await wait_until(lambda: bool(uploads), timeout=10)
+    assert uploads[0][0] == "nas-virtuel"
+
+    # Pas de vraie impression avant confirmation manuelle: le travail reste "assigned".
+    await wait_until(lambda: _job_status(client, job["id"], {"assigned"}), timeout=10)
+    await asyncio.sleep(0.5)
+    assert (await client.get(f"/api/jobs/{job['id']}")).json()["status"] == "assigned"
+
+    # Une imprimante reelle ne peut pas confirmer un demarrage virtuel.
+    refused = await client.post(f"/api/printers/{real['id']}/virtual/start")
+    assert refused.status_code == 400
+
+    started = await client.post(f"/api/printers/{virtual['id']}/virtual/start")
+    assert started.status_code == 200
+    await wait_until(lambda: _job_status(client, job["id"], {"printing"}), timeout=10)
+
+    finished = await client.post(f"/api/printers/{virtual['id']}/virtual/finish")
+    assert finished.status_code == 200
+    await wait_until(lambda: _job_status(client, job["id"], {"completed"}), timeout=10)
+
+    virtual_after = (await client.get(f"/api/printers/{virtual['id']}")).json()
+    assert virtual_after["bed_cleared"] is False
+
+
 async def _job_status(client, job_id, expected: set[str]):
     response = await client.get(f"/api/jobs/{job_id}")
     return response.json()["status"] in expected
@@ -277,9 +389,9 @@ async def test_travail_incompatible_reste_en_file(client, simulator):
     report = await client.get(f"/api/jobs/{job['id']}/match")
     assert report.status_code == 200
     verdicts = report.json()
-    assert len(verdicts) == 1
-    assert verdicts[0]["ok"] is False
-    assert "aucune bobine" in verdicts[0]["reason"]
+    verdict = next(v for v in verdicts if v["printer_id"] == simulator["id"])
+    assert verdict["ok"] is False
+    assert "aucune bobine" in verdict["reason"]
 
     still_queued = (await client.get(f"/api/jobs/{job['id']}")).json()
     assert still_queued["status"] == "queued"
@@ -389,7 +501,8 @@ async def test_dispatcher_suspendu(client, simulator):
 # ----------------------------------------------------------------- systeme
 async def test_stats_et_journal(client, simulator):
     stats = (await client.get("/api/system/stats")).json()
-    assert stats["printers"]["total"] == 1
+    # +1: l'imprimante virtuelle auto-creee pour le meme modele (K1 Max).
+    assert stats["printers"]["total"] == 2
     assert "disk" in stats
 
     events = (await client.get("/api/system/events?limit=10")).json()
@@ -419,8 +532,15 @@ async def test_stats_imprimantes_libres_et_pieces(client, simulator):
     """Le tableau de bord compte les machines disponibles et les pieces sorties."""
     from allbudy.printers.manager import manager
 
+    # La virtuelle auto-creee (meme modele) se connecte elle aussi en tache
+    # de fond: laisser le temps a son premier cycle avant de compter.
+    printers = (await client.get("/api/printers")).json()
+    virtual = next(p for p in printers if p["transport"] == "virtual")
+    await wait_until(lambda: _connected(virtual["id"]), timeout=10)
+
     stats = (await client.get("/api/system/stats")).json()
-    assert stats["printers"]["free"] == 1
+    # +1: l'imprimante virtuelle auto-creee (toujours "connectee") compte aussi.
+    assert stats["printers"]["free"] == 2
     assert stats["jobs"]["pieces_7d"] == 0
 
     # Un plateau de 3 pieces, imprime une fois -> 3 pieces au compteur.
@@ -438,11 +558,12 @@ async def test_stats_imprimantes_libres_et_pieces(client, simulator):
     manager.get(simulator["id"]).transport.set_print_duration(2)
     job = (await client.post("/api/jobs", json={"file_id": file["id"]})).json()
 
-    # Pendant l'impression, la machine n'est plus comptee comme libre. Le compte
+    # Pendant l'impression, la machine n'est plus comptee comme libre (la
+    # virtuelle, elle, reste toujours "connectee": il en reste 1). Le compte
     # vient du cache d'etat du parc, rafraichi par la boucle d'interrogation:
     # il peut accuser un intervalle de retard sur le statut du travail.
     await wait_until(lambda: _job_status(client, job["id"], {"printing"}), timeout=15)
-    await wait_until(lambda: _free_printers(client, 0), timeout=10)
+    await wait_until(lambda: _free_printers(client, 1), timeout=10)
 
     await wait_until(lambda: _job_status(client, job["id"], {"completed"}), timeout=25)
     done = (await client.get("/api/system/stats")).json()

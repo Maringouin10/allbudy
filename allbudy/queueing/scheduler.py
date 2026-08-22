@@ -24,8 +24,18 @@ from sqlalchemy.orm import selectinload
 from ..config import get_settings
 from ..db import session_scope
 from ..events import bus, record_event
+from ..files.remotes import RemoteError, upload_remote
 from ..files.store import local_path
-from ..models import ACTIVE_JOB_STATUSES, GcodeFile, Job, JobStatus, Printer, Spool
+from ..models import (
+    ACTIVE_JOB_STATUSES,
+    GcodeFile,
+    Job,
+    JobStatus,
+    Printer,
+    RemoteStorage,
+    Spool,
+    TransportKind,
+)
 from ..printers.base import (
     STATE_COMPLETE,
     STATE_ERROR,
@@ -208,6 +218,12 @@ class JobScheduler:
                     session=session,
                 )
                 if printer_id is not None:
+                    printer = await session.get(Printer, printer_id)
+                    if printer is not None:
+                        # Tant que ce n'est pas confirme, la file ne renvoie rien
+                        # sur cette machine: on eviterait sinon d'imprimer par-
+                        # dessus une piece pas encore retiree du plateau.
+                        printer.bed_cleared = False
                     # Le plateau est encore chaud: on ne guette sa temperature
                     # qu'a partir de maintenant (voir PrinterManager._check_bed_cold).
                     self.manager.arm_bed_cold(printer_id)
@@ -337,7 +353,13 @@ class JobScheduler:
         return best[1] if best else None
 
     async def _send_job(self, job_id: int) -> None:
-        """Televerse le fichier puis lance l'impression."""
+        """Televerse le fichier puis lance l'impression.
+
+        Pour une imprimante virtuelle, « televerser » veut dire envoyer le
+        fichier sur son depot NAS configure plutot que sur une machine, et
+        « lancer » n'arme qu'une attente de confirmation manuelle: il n'y a
+        pas de telemetrie pour savoir si l'impression a reellement demarre.
+        """
         async with session_scope() as session:
             job = await session.get(Job, job_id)
             if job is None or job.status != JobStatus.ASSIGNED.value or job.printer_id is None:
@@ -353,6 +375,23 @@ class JobScheduler:
                     session, job, success=False, error="fichier absent du disque"
                 )
                 return
+            printer = await session.get(Printer, printer_id)
+            is_virtual = bool(printer and printer.transport == TransportKind.VIRTUAL.value)
+            virtual_storage = None
+            if is_virtual:
+                storage_id = printer.virtual_target_storage_id
+                if storage_id is None:
+                    await self._complete_job(
+                        session, job, success=False,
+                        error="aucun depot NAS configure pour cette imprimante virtuelle",
+                    )
+                    return
+                virtual_storage = await session.get(RemoteStorage, storage_id)
+                if virtual_storage is None:
+                    await self._complete_job(
+                        session, job, success=False, error="depot NAS configure introuvable"
+                    )
+                    return
             remote_name = file.stored_name
             bed_leveling = job.bed_leveling
             job.status = JobStatus.SENDING.value
@@ -364,21 +403,25 @@ class JobScheduler:
             # Le verrou couvre televersement + lancement: deux travaux ne
             # peuvent pas se marcher dessus sur la meme machine.
             async with self._lock(printer_id):
-                await self.manager.command(
-                    printer_id, lambda t: t.upload(path, remote_name, start=False)
-                )
-                if bed_leveling:
-                    try:
-                        await self.manager.command(
-                            printer_id, lambda t: t.send_gcode(BED_MESH_MACRO)
-                        )
-                    except PrinterError as exc:
-                        # Une machine sans cette macro ne doit pas bloquer l'impression.
-                        log.warning(
-                            "Nivellement du plateau echoue pour le travail %s: %s", job_id, exc
-                        )
+                if is_virtual:
+                    target = f"{(virtual_storage.remote_path or '/').rstrip('/')}/{remote_name}"
+                    await upload_remote(virtual_storage, path, target)
+                else:
+                    await self.manager.command(
+                        printer_id, lambda t: t.upload(path, remote_name, start=False)
+                    )
+                    if bed_leveling:
+                        try:
+                            await self.manager.command(
+                                printer_id, lambda t: t.send_gcode(BED_MESH_MACRO)
+                            )
+                        except PrinterError as exc:
+                            # Une machine sans cette macro ne doit pas bloquer l'impression.
+                            log.warning(
+                                "Nivellement du plateau echoue pour le travail %s: %s", job_id, exc
+                            )
                 await self.manager.command(printer_id, lambda t: t.start_print(remote_name))
-        except PrinterError as exc:
+        except (PrinterError, RemoteError) as exc:
             error = str(exc)
         except Exception as exc:  # noqa: BLE001 - sinon le travail resterait en "envoi"
             log.exception("Echec inattendu de l'envoi du travail %s", job_id)
@@ -390,6 +433,17 @@ class JobScheduler:
                 return
             if error:
                 await self._complete_job(session, job, success=False, error=error)
+                return
+            if is_virtual:
+                # Retour a "assigned": pas de vraie impression en cours, en
+                # attente de confirmation manuelle (voir l'action « demarrer »
+                # sur l'imprimante virtuelle).
+                job.status = JobStatus.ASSIGNED.value
+                await record_event(
+                    f"'{job.name}' envoye sur le depot NAS, en attente de demarrage manuel",
+                    category="job", printer_id=printer_id, job_id=job_id, session=session,
+                )
+                bus.publish("job.updated", {"job_id": job_id, "status": job.status})
                 return
             job.status = JobStatus.PRINTING.value
             job.started_at = datetime.now(UTC)

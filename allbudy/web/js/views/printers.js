@@ -14,7 +14,48 @@ const TRANSPORTS = [
 
 const DEFAULT_PORTS = { moonraker: 7125, creality_lan: 9999, simulator: 0 };
 
+/** Formulaire dedie: une imprimante virtuelle n'a qu'un depot NAS cible a
+ * configurer, tout le reste (protocole, buse, camera...) ne s'applique pas.
+ * Le modele suit celui du parc reel (voir sync_virtual_printers cote serveur)
+ * et n'est pas modifiable ici. */
+function virtualPrinterForm(printer) {
+  const form = {
+    name: el('input', { value: printer.name || '' }),
+    virtual_target_storage_id: el('select', {}, [el('option', { value: '', text: 'Aucun (non configure)' })]),
+    tags: el('input', { value: (printer.tags || []).join(', '), placeholder: 'abs, chambre-chauffee' }),
+    enabled: el('input', { type: 'checkbox', checked: printer.enabled !== false }),
+  };
+  api.storages().then((storages) => {
+    for (const storage of storages) {
+      form.virtual_target_storage_id.append(el('option', {
+        value: storage.id, text: storage.name,
+        selected: printer.virtual_target_storage_id === storage.id,
+      }));
+    }
+  }).catch(() => {});
+
+  const body = el('div', {}, [
+    field('Nom', form.name),
+    field('Modele', el('input', { value: printer.model || '', disabled: true }), 'Suit automatiquement le parc reel'),
+    field('Depot NAS cible', form.virtual_target_storage_id, 'Un « Imprimer » vers cette virtuelle y envoie le fichier'),
+    field('Etiquettes', form.tags, 'Separees par des virgules'),
+    el('div', { class: 'check' }, [form.enabled, el('label', { text: 'Activee' })]),
+  ]);
+
+  const read = () => ({
+    name: form.name.value.trim(),
+    virtual_target_storage_id: form.virtual_target_storage_id.value
+      ? Number(form.virtual_target_storage_id.value) : null,
+    tags: form.tags.value.split(',').map((t) => t.trim()).filter(Boolean),
+    enabled: form.enabled.checked,
+  });
+
+  return { body, read };
+}
+
 function printerForm(printer = {}) {
+  if (printer.transport === 'virtual') return virtualPrinterForm(printer);
+
   const form = {};
   const body = el('div');
 
@@ -146,13 +187,17 @@ export function printersView(navigate) {
             el('div', { class: 'row', style: 'gap:.5rem' }, [
               printerIcon(printer.model, { size: 24 }),
               el('a', { href: `#/printer/${printer.id}`, text: printer.name }),
+              printer.transport === 'virtual' ? el('span', { class: 'badge', text: 'virtuelle' }) : null,
               printer.enabled ? null : el('span', { class: 'badge', text: 'desactivee' }),
             ]),
           ]),
           el('td', { text: printer.model }),
           el('td', { class: 'small muted', text: printer.transport }),
-          el('td', { class: 'mono small', text: `${printer.host}:${printer.port}` }),
-          el('td', { text: `${printer.nozzle_diameter} mm` }),
+          el('td', {
+            class: 'mono small',
+            text: printer.transport === 'virtual' ? '—' : `${printer.host}:${printer.port}`,
+          }),
+          el('td', { text: printer.transport === 'virtual' ? '—' : `${printer.nozzle_diameter} mm` }),
           el('td', {}, [badge(state)]),
           el('td', { class: 'actions' }, [
             el('button', { class: 'sm', text: 'Piloter', onClick: () => navigate(`printer/${printer.id}`) }),

@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..models import GcodeFile, Job, Printer, Spool
+from ..models import GcodeFile, Job, Printer, Spool, TransportKind
 
 #: Materiaux consideres comme equivalents pour l'attribution.
 _MATERIAL_ALIASES = {
@@ -187,10 +187,16 @@ def evaluate(
         return MatchResult(False, "hors ligne")
     if not free:
         return MatchResult(False, "occupee")
+    if not printer.bed_cleared:
+        return MatchResult(False, "plateau pas encore confirme vide")
 
     allowed = job.allowed_printers or []
     if allowed and printer.id not in allowed:
         return MatchResult(False, "hors de la liste autorisee")
+    if printer.transport == TransportKind.VIRTUAL.value and printer.id not in allowed:
+        # Une virtuelle n'envoie nulle part physiquement: elle ne doit jamais
+        # etre choisie par le matching automatique, seulement ciblee expres.
+        return MatchResult(False, "imprimante virtuelle: ciblage explicite requis")
 
     required_tags = {str(t).lower() for t in (job.required_tags or [])}
     printer_tags = {str(t).lower() for t in (printer.tags or [])}

@@ -1,14 +1,53 @@
 /**
  * Mode kiosque: interface sobre pour un petit ecran monte pres d'une
- * imprimante (tablette). Deux gestes seulement: imprimer un fichier de la
- * bibliotheque, et marquer un emplacement vide une fois la bobine retiree.
- * Pas de barre laterale ni de tableau de bord: voir app.js pour le shell
- * dedie qui bypasse le chrome habituel sur les routes #/kiosk.
+ * imprimante (tablette). L'essentiel: voir l'etat des machines en un coup
+ * d'oeil, confirmer le plateau vide pour liberer le travail suivant, et
+ * imprimer un fichier de la bibliotheque. Pas de barre laterale ni de
+ * tableau de bord complet: voir app.js pour le shell dedie qui bypasse le
+ * chrome habituel sur les routes #/kiosk.
  */
 import { api, apiUrl } from '../api.js';
+import { printerCard } from '../components.js';
 import { printModal } from './files.js';
-import { on } from '../store.js';
+import { on, printerList } from '../store.js';
 import { clear, el, emptyState, run, toastError } from '../ui.js';
+
+function kioskPrinterTile(entry, printer, onChanged) {
+  const card = printerCard(entry, {
+    onOpen: (id) => window.open(`#/printer/${id}`, '_blank'),
+    onRefresh: onChanged,
+  });
+  const state = entry.status && entry.status.state;
+  if (printer && printer.transport === 'virtual' && state === 'awaiting_start') {
+    card.append(el('button', {
+      class: 'kiosk-empty-btn', style: 'width:100%;margin-top:.6rem;font-weight:700',
+      text: '▶ Demarrer (envoye sur le NAS)',
+      onClick: () => run(async () => {
+        await api.post(`api/printers/${entry.printer_id}/virtual/start`);
+        onChanged();
+      }),
+    }));
+  } else if (printer && printer.transport === 'virtual' && state === 'printing') {
+    card.append(el('button', {
+      class: 'kiosk-empty-btn', style: 'width:100%;margin-top:.6rem;font-weight:700',
+      text: '✓ Terminer',
+      onClick: () => run(async () => {
+        await api.post(`api/printers/${entry.printer_id}/virtual/finish`);
+        onChanged();
+      }),
+    }));
+  } else if (printer && !printer.bed_cleared) {
+    card.append(el('button', {
+      class: 'kiosk-empty-btn', style: 'width:100%;margin-top:.6rem;font-weight:700',
+      text: '🧹 Plateau vide — lancer le travail suivant',
+      onClick: () => run(async () => {
+        await api.patch(`api/printers/${entry.printer_id}`, { bed_cleared: true });
+        onChanged();
+      }, 'Plateau confirme vide'),
+    }));
+  }
+  return card;
+}
 
 function kioskFileTile(file, onPrinted) {
   return el('button', { class: 'kiosk-tile', onClick: () => printModal(file, onPrinted) }, [
@@ -49,7 +88,7 @@ function kioskSpoolTile(spool, onChanged) {
 
 export function kioskView(printerIdArg) {
   const scopedPrinterId = printerIdArg ? Number(printerIdArg) : null;
-  let tab = 'print';
+  let tab = 'printers';
 
   const tabsBox = el('div', { class: 'row', style: 'gap:.4rem' });
   const content = el('div', { class: 'kiosk-content' });
@@ -68,6 +107,11 @@ export function kioskView(printerIdArg) {
   function renderTabs() {
     clear(tabsBox).append(
       el('button', {
+        class: `kiosk-tab ${tab === 'printers' ? 'active' : ''}`,
+        text: '📊 Imprimantes',
+        onClick: () => { tab = 'printers'; renderTabs(); renderContent(); },
+      }),
+      el('button', {
         class: `kiosk-tab ${tab === 'print' ? 'active' : ''}`,
         text: '🖨 Imprimer',
         onClick: () => { tab = 'print'; renderTabs(); renderContent(); },
@@ -78,6 +122,30 @@ export function kioskView(printerIdArg) {
         onClick: () => { tab = 'spools'; renderTabs(); renderContent(); },
       }),
     );
+  }
+
+  async function renderPrintersTab() {
+    clear(content).append(el('p', { class: 'small muted', text: 'Chargement...' }));
+    let printers = [];
+    try {
+      printers = await api.printers();
+    } catch (error) {
+      toastError(error);
+    }
+    const byId = new Map(printers.map((p) => [p.id, p]));
+    const entries = printerList()
+      .filter((entry) => !scopedPrinterId || entry.printer_id === scopedPrinterId)
+      .sort((a, b) => a.printer_id - b.printer_id);
+    clear(content);
+    if (!entries.length) {
+      content.append(emptyState('🖨️', 'Aucune imprimante configuree.'));
+      return;
+    }
+    const grid = el('div', { class: 'kiosk-grid printers' });
+    for (const entry of entries) {
+      grid.append(kioskPrinterTile(entry, byId.get(entry.printer_id), renderPrintersTab));
+    }
+    content.append(grid);
   }
 
   async function renderPrintTab() {
@@ -122,15 +190,31 @@ export function kioskView(printerIdArg) {
   }
 
   function renderContent() {
-    if (tab === 'print') renderPrintTab();
+    if (tab === 'printers') renderPrintersTab();
+    else if (tab === 'print') renderPrintTab();
     else renderSpoolsTab();
   }
 
   renderTabs();
   renderContent();
 
-  const unsubscribe = on('spools.updated', () => { if (tab === 'spools') renderSpoolsTab(); });
-  root.cleanup = unsubscribe;
+  // Debattu: chaque imprimante pousse son etat toutes les ~2 s, inutile de
+  // rappeler l'API a cette cadence pour un simple rafraichissement visuel.
+  let pendingPrintersRefresh = null;
+  const unsubscribers = [
+    on('spools.updated', () => { if (tab === 'spools') renderSpoolsTab(); }),
+    on('printers', () => {
+      if (tab !== 'printers' || pendingPrintersRefresh) return;
+      pendingPrintersRefresh = setTimeout(() => {
+        pendingPrintersRefresh = null;
+        renderPrintersTab();
+      }, 2000);
+    }),
+  ];
+  root.cleanup = () => {
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    clearTimeout(pendingPrintersRefresh);
+  };
 
   return root;
 }

@@ -21,7 +21,7 @@ from .events import record_event
 from .files.remotes import RemoteError, sync_storage
 from .models import Printer, RemoteStorage, TransportKind
 from .printers.base import PrinterError
-from .printers.manager import manager
+from .printers.manager import manager, sync_virtual_printers
 from .queueing import scheduler
 from .security import ensure_admin_user
 
@@ -141,6 +141,8 @@ async def lifespan(app: FastAPI):
     await init_db()
     await ensure_admin_user()
     await seed_demo_printers()
+    async with session_scope() as session:
+        await sync_virtual_printers(session)
     await manager.start()
     await scheduler.start()
     sync_task = asyncio.create_task(remote_sync_worker(), name="remote-sync")

@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..db import session_scope
@@ -24,6 +25,7 @@ from .base import (
 from .creality_lan import CrealityLanTransport
 from .moonraker import MoonrakerTransport
 from .simulator import SimulatorTransport
+from .virtual import VirtualTransport
 
 log = logging.getLogger("allbudy.manager")
 
@@ -33,6 +35,7 @@ TRANSPORTS: dict[str, type[PrinterTransport]] = {
     TransportKind.MOONRAKER.value: MoonrakerTransport,
     TransportKind.CREALITY_LAN.value: CrealityLanTransport,
     TransportKind.SIMULATOR.value: SimulatorTransport,
+    TransportKind.VIRTUAL.value: VirtualTransport,
 }
 
 #: Ports par defaut par protocole.
@@ -40,7 +43,48 @@ DEFAULT_PORTS = {
     TransportKind.MOONRAKER.value: 7125,
     TransportKind.CREALITY_LAN.value: 9999,
     TransportKind.SIMULATOR.value: 0,
+    TransportKind.VIRTUAL.value: 0,
 }
+
+
+#: Suffixe distinguant une imprimante virtuelle dans la liste.
+VIRTUAL_NAME_SUFFIX = " (virtuelle)"
+
+
+async def sync_virtual_printers(session: AsyncSession) -> list[Printer]:
+    """Garantit une imprimante virtuelle par modele reel distinct du parc.
+
+    Ne supprime jamais une virtuelle existante, meme si son modele n'a plus
+    de machine reelle correspondante: sa cible NAS deja configuree serait
+    perdue pour rien. Seule la creation est automatique.
+    """
+    rows = (await session.execute(select(Printer))).scalars().all()
+    real_models = {
+        p.model for p in rows if p.transport != TransportKind.VIRTUAL.value and p.model
+    }
+    virtual_models = {p.model for p in rows if p.transport == TransportKind.VIRTUAL.value}
+    existing_names = {p.name for p in rows}
+
+    created = []
+    for model in sorted(real_models - virtual_models):
+        name = f"{model}{VIRTUAL_NAME_SUFFIX}"
+        if name in existing_names:
+            continue
+        printer = Printer(
+            name=name,
+            model=model,
+            transport=TransportKind.VIRTUAL.value,
+            host="virtual",
+            port=0,
+            enabled=True,
+            auto_assign=True,
+        )
+        session.add(printer)
+        existing_names.add(name)
+        created.append(printer)
+    if created:
+        await session.flush()
+    return created
 
 
 def build_config(printer: Printer) -> PrinterConfig:

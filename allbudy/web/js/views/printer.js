@@ -44,6 +44,17 @@ export function printerDetailView(printerId, navigate) {
       el('h1', { text: printer ? printer.name : `Imprimante #${id}` }),
       badge(state),
       el('div', { class: 'spacer' }),
+      printer && !printer.bed_cleared
+        ? el('button', {
+            class: 'primary', text: '🧹 Plateau vide',
+            title: 'Confirme que la piece a ete retiree: libere la machine pour le travail suivant',
+            onClick: () => run(async () => {
+              await api.patch(`api/printers/${id}`, { bed_cleared: true });
+              printer.bed_cleared = true;
+              renderHeader();
+            }, 'Plateau confirme vide'),
+          })
+        : null,
       el('a', {
         class: 'btn', href: `#/kiosk/${id}`, target: '_blank',
         title: 'Ouvrir le mode kiosque pour cette imprimante', text: '📱 Kiosque',
@@ -93,6 +104,35 @@ export function printerDetailView(printerId, navigate) {
     };
   }
 
+  /** Fiche « Etat » dediee: pas de telemetrie sur une imprimante virtuelle,
+   * seulement l'etape en cours et les confirmations manuelles. */
+  function renderVirtualStatus(status) {
+    statusCard.append(el('h3', { text: 'Etat' }));
+    const extra = libraryEntry(status.filename);
+    if (status.filename) {
+      statusCard.append(el('div', { class: 'small truncate', text: status.filename }));
+    }
+    if (status.state === 'awaiting_start') {
+      statusCard.append(
+        el('p', { class: 'small muted', text: 'Fichier envoye sur le depot NAS. Une fois l\'impression lancee sur la machine reelle, confirmez ici pour que le suivi reste a jour.' }),
+        el('button', {
+          class: 'primary', text: '▶ Demarrer',
+          onClick: () => run(() => api.post(`api/printers/${id}/virtual/start`)),
+        }),
+      );
+    } else if (status.state === 'printing') {
+      statusCard.append(
+        el('p', { class: 'small muted', text: `${extra.pieces ? `${extra.pieces} piece(s) · ` : ''}en cours sur la machine reelle.` }),
+        el('button', {
+          class: 'primary', text: '✓ Terminer',
+          onClick: () => run(() => api.post(`api/printers/${id}/virtual/finish`)),
+        }),
+      );
+    } else {
+      statusCard.append(el('p', { class: 'small muted', text: 'Aucun travail en cours: mettez ce fichier en file pour l\'envoyer sur le depot NAS configure.' }));
+    }
+  }
+
   function renderStatus() {
     const live = printerState(id);
     clear(statusCard);
@@ -101,6 +141,10 @@ export function printerDetailView(printerId, navigate) {
       return;
     }
     const status = live.status || {};
+    if (printer && printer.transport === 'virtual') {
+      renderVirtualStatus(status);
+      return;
+    }
     statusCard.append(el('h3', { text: 'Etat' }));
 
     if (!live.connected) {
@@ -171,6 +215,10 @@ export function printerDetailView(printerId, navigate) {
     const live = printerState(id);
     const status = (live && live.status) || {};
     clear(controlsCard).append(el('h3', { text: 'Commandes' }));
+    if (printer && printer.transport === 'virtual') {
+      controlsCard.append(el('p', { class: 'small muted', text: 'Aucune commande machine: cette imprimante est virtuelle.' }));
+      return;
+    }
 
     const stepRow = el('div', { class: 'row', style: 'margin-bottom:.5rem' }, [
       el('span', { class: 'small muted', text: 'Pas' }),

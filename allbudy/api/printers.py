@@ -14,7 +14,7 @@ from ..files.store import local_path
 from ..models import ACTIVE_JOB_STATUSES, GcodeFile, Job, JobStatus, Printer, TransportKind
 from ..printers.base import PrinterError
 from ..printers.discovery import default_network, identify_model, scan
-from ..printers.manager import DEFAULT_PORTS, manager
+from ..printers.manager import DEFAULT_PORTS, manager, sync_virtual_printers
 from ..queueing import scheduler
 from ..schemas import (
     DiscoveryRequest,
@@ -42,6 +42,21 @@ async def _get_printer(session: AsyncSession, printer_id: int) -> Printer:
     if printer is None:
         raise HTTPException(status_code=404, detail="Imprimante introuvable")
     return printer
+
+
+async def _sync_and_register_virtuals(session: AsyncSession) -> None:
+    """Un nouveau modele reel (creation ou changement via update) doit avoir
+    sa virtuelle sans action manuelle."""
+    created = await sync_virtual_printers(session)
+    if not created:
+        return
+    await session.commit()
+    for virtual in created:
+        await manager.add(virtual)
+        await record_event(
+            f"Imprimante virtuelle ajoutee: {virtual.name}",
+            category="printer", printer_id=virtual.id,
+        )
 
 
 def _wrap(action):
@@ -81,6 +96,7 @@ async def create_printer(
     await manager.add(printer)
     await record_event(f"Imprimante ajoutee: {printer.name}", category="printer",
                        printer_id=printer.id)
+    await _sync_and_register_virtuals(session)
     return printer
 
 
@@ -171,6 +187,7 @@ async def update_printer(
         raise HTTPException(status_code=409, detail="Ce nom d'imprimante existe deja") from exc
     await session.refresh(printer)
     await manager.reload(printer)
+    await _sync_and_register_virtuals(session)
     return printer
 
 
@@ -216,6 +233,43 @@ async def reconnect(
     printer = await _get_printer(session, printer_id)
     await manager.reload(printer)
     return MessageResponse(message=f"Reconnexion de {printer.name} demandee")
+
+
+async def _require_virtual(session: AsyncSession, printer_id: int) -> Printer:
+    printer = await _get_printer(session, printer_id)
+    if printer.transport != TransportKind.VIRTUAL.value:
+        raise HTTPException(
+            status_code=400, detail="Cette action n'existe que pour une imprimante virtuelle"
+        )
+    return printer
+
+
+@router.post("/{printer_id}/virtual/start", response_model=MessageResponse)
+async def confirm_virtual_start(
+    printer_id: int, session: AsyncSession = Depends(get_session)
+) -> MessageResponse:
+    """L'operateur a physiquement lance l'impression a partir du fichier envoye sur le NAS."""
+    printer = await _require_virtual(session, printer_id)
+    await _wrap(lambda t: t.confirm_start())(printer_id)
+    await record_event(
+        f"Demarrage confirme sur {printer.name}", category="printer", printer_id=printer_id
+    )
+    scheduler.wake()
+    return MessageResponse(message="Impression marquee en cours")
+
+
+@router.post("/{printer_id}/virtual/finish", response_model=MessageResponse)
+async def confirm_virtual_finish(
+    printer_id: int, session: AsyncSession = Depends(get_session)
+) -> MessageResponse:
+    """L'operateur confirme que l'impression est terminee (pas de telemetrie a attendre)."""
+    printer = await _require_virtual(session, printer_id)
+    await _wrap(lambda t: t.confirm_finished())(printer_id)
+    await record_event(
+        f"Fin confirmee sur {printer.name}", category="printer", printer_id=printer_id
+    )
+    scheduler.wake()
+    return MessageResponse(message="Impression marquee terminee")
 
 
 # -------------------------------------------------------------- commandes

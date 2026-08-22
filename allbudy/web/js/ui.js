@@ -72,6 +72,7 @@ const STATE_LABELS = {
   complete: 'Terminee',
   error: 'Erreur',
   busy: 'Occupee',
+  awaiting_start: 'A demarrer',
 };
 
 const JOB_LABELS = {

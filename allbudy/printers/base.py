@@ -25,6 +25,8 @@ STATE_PAUSED = "paused"
 STATE_COMPLETE = "complete"
 STATE_ERROR = "error"
 STATE_BUSY = "busy"
+STATE_AWAITING_START = "awaiting_start"
+"""Imprimante virtuelle: fichier envoye sur le NAS, demarrage a confirmer a la main."""
 
 BUSY_STATES = {STATE_PRINTING, STATE_PAUSED, STATE_BUSY}
 

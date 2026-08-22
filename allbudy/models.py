@@ -36,6 +36,9 @@ class TransportKind(str, enum.Enum):
     """WebSocket proprietaire Creality port 9999 (firmware stock, mode LAN/developpeur)."""
     SIMULATOR = "simulator"
     """Imprimante simulee, pour la demo et les tests."""
+    VIRTUAL = "virtual"
+    """Pas de machine reelle: « imprimer » envoie le fichier sur un depot NAS,
+    demarrage et fin sont confirmes a la main (pas de telemetrie possible)."""
 
 
 class JobStatus(str, enum.Enum):
@@ -100,6 +103,15 @@ class Printer(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    bed_cleared: Mapped[bool] = mapped_column(Boolean, default=True)
+    """Plateau confirme vide depuis la derniere impression terminee: tant que
+    c'est faux, la file n'attribue plus de nouveau travail a cette machine
+    (evite d'imprimer par-dessus une piece pas encore retiree)."""
+    virtual_target_storage_id: Mapped[int | None] = mapped_column(
+        ForeignKey("remote_storages.id", ondelete="SET NULL"), nullable=True
+    )
+    """Depot distant recevant les fichiers d'une imprimante virtuelle (transport=virtual)."""
 
     spools: Mapped[list[Spool]] = relationship(
         back_populates="printer", cascade="all, delete-orphan"

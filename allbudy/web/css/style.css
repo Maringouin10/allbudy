@@ -442,6 +442,7 @@ td.actions { text-align: right; white-space: nowrap; }
 .kiosk-tile-label { padding: .65rem .75rem; font-size: .92rem; font-weight: 600; }
 
 .kiosk-grid.spools { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.kiosk-grid.printers { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-items: start; }
 .kiosk-spool {
   display: flex; align-items: center; gap: .7rem;
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);

@@ -69,6 +69,8 @@ class PrinterBase(BaseModel):
     upload_root: str = "gcodes"
     notes: str | None = None
     sort_order: int = 0
+    virtual_target_storage_id: int | None = None
+    """Depot distant cible pour une imprimante virtuelle (transport=virtual)."""
 
 
 class PrinterCreate(PrinterBase):
@@ -92,6 +94,8 @@ class PrinterUpdate(BaseModel):
     upload_root: str | None = None
     notes: str | None = None
     sort_order: int | None = None
+    virtual_target_storage_id: int | None = None
+    bed_cleared: bool | None = None
 
 
 class PrinterOut(PrinterBase):
@@ -99,6 +103,7 @@ class PrinterOut(PrinterBase):
 
     id: int
     created_at: datetime | None = None
+    bed_cleared: bool = True
 
 
 # ------------------------------------------------------------------- spools

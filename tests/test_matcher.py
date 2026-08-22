@@ -21,6 +21,7 @@ def make_printer(**kwargs) -> Printer:
         "auto_assign": True,
         "nozzle_diameter": 0.4,
         "tags": [],
+        "bed_cleared": True,
     }
     return Printer(**{**defaults, "id": kwargs.pop("id", 1), **kwargs})
 
@@ -184,6 +185,13 @@ def test_evaluate_ok():
     assert result.ok
     # Le filament deja charge fait gagner des points.
     assert result.score > 1.0
+
+
+def test_evaluate_plateau_non_confirme_vide():
+    """Une machine qui vient de terminer n'est reproposee qu'apres confirmation."""
+    result = _evaluate(make_job(), make_printer(bed_cleared=False), [], file=make_file({}))
+    assert not result.ok
+    assert "plateau" in result.reason
 
 
 def test_evaluate_hors_ligne():
