@@ -1,6 +1,6 @@
 /** Pilotage detaille d'une imprimante. */
 import { api, apiUrl } from '../api.js';
-import { slotChips } from '../components.js';
+import { cfsPanel, fanPanel } from '../components.js';
 import { on, printerState } from '../store.js';
 import {
   badge, clear, confirmDialog, el, field, formatBytes, formatDuration, formatTemp, modal, run,
@@ -176,7 +176,6 @@ export function printerDetailView(printerId, navigate) {
 
     const extrudeAmount = el('input', { type: 'number', value: 10, style: 'width:5rem' });
     const speedInput = el('input', { type: 'number', value: Math.round(status.speed_factor || 100), style: 'width:5rem' });
-    const fanInput = el('input', { type: 'range', min: 0, max: 100, value: Math.round(status.part_fan || 0) });
 
     controlsCard.append(
       stepRow,
@@ -192,9 +191,10 @@ export function printerDetailView(printerId, navigate) {
         speedInput,
         el('button', { class: 'sm', text: 'Appliquer', onClick: () => command('speed', { percent: Number(speedInput.value) }) }),
       ]),
-      el('div', { style: 'margin-top:.5rem' }, [
-        el('label', { text: `Ventilateur piece: ${Math.round(status.part_fan || 0)} %` }),
-        fanInput,
+      el('div', { class: 'card-section', style: 'margin-top:.7rem' }, [
+        el('div', { class: 'section-title', text: 'Ventilateurs' }),
+        fanPanel(status.fans, { printerId: id, onChange: renderControls })
+          || el('div', { class: 'small muted', text: 'Aucun ventilateur remonte par cette machine.' }),
       ]),
       el('div', { class: 'row', style: 'margin-top:.5rem' }, [
         el('button', { class: 'sm', text: 'Lumiere ON', onClick: () => command('light', { on: true }) }),
@@ -202,7 +202,6 @@ export function printerDetailView(printerId, navigate) {
         el('button', { class: 'sm', text: 'Moteurs OFF', onClick: () => command('gcode', { script: 'M84' }) }),
       ]),
     );
-    fanInput.addEventListener('change', () => command('fan', { fan: 'part', speed: Number(fanInput.value) }));
   }
 
   function renderCfs() {
@@ -214,7 +213,7 @@ export function printerDetailView(printerId, navigate) {
       cfsCard.append(el('button', { class: 'sm', text: 'Ouvrir Filaments', onClick: () => navigate('spools') }));
       return;
     }
-    cfsCard.append(slotChips(spools));
+    cfsCard.append(cfsPanel(spools));
     cfsCard.append(el('div', { class: 'small muted', style: 'margin-top:.5rem', text: 'Etat lu directement sur la machine et synchronise avec l\'inventaire.' }));
   }
 

@@ -29,6 +29,15 @@ _CREALITY_THUMB_RE = re.compile(r";\s*(gimage|simage)\s*:\s*([A-Za-z0-9+/=]{64,}
 
 _MAGIC = {b"\x89PNG": ".png", b"\xff\xd8\xff": ".jpg", b"qoif": ".qoi"}
 
+#: Marqueurs d'objets, par ordre de fiabilite decroissante.
+#: `EXCLUDE_OBJECT_DEFINE` (Klipper) est emis en tete, une ligne par piece.
+_EXCLUDE_OBJECT_RE = re.compile(r"^\s*EXCLUDE_OBJECT_DEFINE\s+NAME=(\S+)", re.I | re.M)
+#: `M486 S<n>` (Marlin/PrusaSlicer): l'index le plus haut donne le nombre de pieces.
+_M486_RE = re.compile(r"^\s*M486\s+S(-?\d+)", re.I | re.M)
+#: Commentaires nommant l'objet en cours, emis par Orca/PrusaSlicer et Cura.
+_PRINTING_OBJECT_RE = re.compile(r";\s*printing object\s+(.+?)\s*$", re.I | re.M)
+_MESH_RE = re.compile(r";\s*MESH\s*:\s*(.+?)\s*$", re.I | re.M)
+
 #: Cles portant la duree estimee, selon le trancheur.
 _TIME_KEYS = (
     "estimated printing time (normal mode)",
@@ -52,6 +61,31 @@ def parse_duration(text: str) -> int | None:
     days, hours, minutes, seconds = (int(g) if g else 0 for g in match.groups())
     total = days * 86400 + hours * 3600 + minutes * 60 + seconds
     return total or None
+
+
+def count_objects(text: str) -> int | None:
+    """Nombre de pieces posees sur le plateau, ou None si indeterminable.
+
+    Les trancheurs ne l'annoncent pas directement: on le deduit des marqueurs
+    d'objets. `EXCLUDE_OBJECT_DEFINE` est le plus fiable car emis en tete, une
+    ligne par piece; les autres marqueurs sont semes dans le corps du fichier,
+    donc leur comptage peut sous-estimer si le fichier n'est lu que par morceaux.
+    """
+    defined = _EXCLUDE_OBJECT_RE.findall(text)
+    if defined:
+        return len(set(defined))
+
+    indexes = [int(value) for value in _M486_RE.findall(text)]
+    positives = [index for index in indexes if index >= 0]
+    if positives:
+        return max(positives) + 1
+
+    for pattern in (_PRINTING_OBJECT_RE, _MESH_RE):
+        names = {name.strip() for name in pattern.findall(text)}
+        names.discard("NONMESH")
+        if names:
+            return len(names)
+    return None
 
 
 def _split_list(value: str) -> list[str]:
@@ -89,6 +123,7 @@ class GcodeMetadata:
     nozzle_temp: float | None = None
     bed_temp: float | None = None
     printer_model: str | None = None
+    object_count: int | None = None
     printable: bool = True
 
     def to_dict(self) -> dict[str, Any]:
@@ -182,6 +217,7 @@ def parse_gcode_text(text: str) -> GcodeMetadata:
         elif key in ("printer_model", "machine_name", "printer_settings_id", "target_machine.name"):
             meta.printer_model = meta.printer_model or value
 
+    meta.object_count = count_objects(text)
     if filament_g_parts:
         meta.filament_used_g = round(sum(filament_g_parts), 2)
     if meta.slicer is None and "CrealityPrint" in text[:4000]:

@@ -28,6 +28,7 @@ from .base import (
     STATE_IDLE,
     STATE_PAUSED,
     STATE_PRINTING,
+    FanState,
     PrinterError,
     PrinterStatus,
     PrinterTransport,
@@ -102,6 +103,7 @@ class MoonrakerTransport(PrinterTransport):
         self._chamber_fan_key: str | None = None
         self._light_key: str | None = None
         self._cfs_key: str | None = None
+        self._extra_fans: list[str] = []
         self._client: httpx.AsyncClient | None = None
         self._ws_ok = False
 
@@ -254,6 +256,16 @@ class MoonrakerTransport(PrinterTransport):
         if self._cfs_key:
             self.config.has_cfs = True
 
+        # Tout ventilateur restant est remonte en lecture seule: le ventilateur
+        # de tete par exemple est asservi au firmware, on l'affiche sans le piloter.
+        known = {"fan", self._aux_fan_key, self._chamber_fan_key}
+        self._extra_fans = [
+            name
+            for name in self._available
+            if name.startswith(("fan_generic ", "heater_fan ", "controller_fan "))
+            and name not in known
+        ]
+
     def _subscription(self) -> dict[str, Any]:
         objects = dict(_CORE_OBJECTS)
         for key in (
@@ -262,6 +274,7 @@ class MoonrakerTransport(PrinterTransport):
             self._chamber_fan_key,
             self._light_key,
             self._cfs_key,
+            *self._extra_fans,
         ):
             if key:
                 objects[key] = None
@@ -369,6 +382,7 @@ class MoonrakerTransport(PrinterTransport):
             status.aux_fan = round(_as_float(obj[self._aux_fan_key].get("speed")) * 100, 1)
         if self._chamber_fan_key and self._chamber_fan_key in obj:
             status.chamber_fan = round(_as_float(obj[self._chamber_fan_key].get("speed")) * 100, 1)
+        status.fans = self._build_fans()
         if self._light_key and self._light_key in obj:
             light = obj[self._light_key]
             status.light_on = _as_float(light.get("value", light.get("white", 0))) > 0
@@ -384,6 +398,36 @@ class MoonrakerTransport(PrinterTransport):
         status.spools = self._parse_cfs()
         status.raw = {"print_stats": print_stats, "webhooks": webhooks}
         return status
+
+    def _build_fans(self) -> list[FanState]:
+        """Detaille chaque ventilateur present, avec son regime s'il est mesure."""
+        fans: list[FanState] = []
+
+        def add(object_name: str | None, label: str, control_key: str | None) -> None:
+            if not object_name or object_name not in self._objects:
+                return
+            payload = self._objects[object_name]
+            if not isinstance(payload, dict):
+                return
+            rpm = payload.get("rpm")
+            fans.append(
+                FanState(
+                    key=control_key,
+                    label=label,
+                    speed=round(_as_float(payload.get("speed")) * 100, 1),
+                    rpm=round(float(rpm)) if isinstance(rpm, (int, float)) else None,
+                    controllable=control_key is not None,
+                )
+            )
+
+        add("fan", "Piece", "part")
+        add(self._aux_fan_key, "Auxiliaire", "aux")
+        add(self._chamber_fan_key, "Chambre", "chamber")
+        for name in self._extra_fans:
+            # "heater_fan hotend_fan" -> "Hotend fan"
+            label = name.split(" ", 1)[-1].replace("_", " ").strip().capitalize()
+            add(name, label or name, None)
+        return fans
 
     def _parse_cfs(self) -> list[SpoolState]:
         """Lit l'objet CFS Creality expose par Moonraker."""

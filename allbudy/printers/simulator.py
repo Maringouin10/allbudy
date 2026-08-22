@@ -19,6 +19,7 @@ from .base import (
     STATE_IDLE,
     STATE_PAUSED,
     STATE_PRINTING,
+    FanState,
     PrinterError,
     PrinterStatus,
     PrinterTransport,
@@ -130,6 +131,12 @@ class SimulatorTransport(PrinterTransport):
                 else (100.0 if self._state == STATE_COMPLETE else 0.0)
             )
             layer = int(progress / 100 * DEFAULT_LAYERS) or None
+            printing = self._state == STATE_PRINTING
+            part_fan = 100.0 if printing else 0.0
+            aux_fan = 60.0 if printing else 0.0
+            chamber_fan = 35.0 if printing else 0.0
+            # Le ventilateur de tete se declenche des que la buse est chaude.
+            hotend_fan = 100.0 if self._nozzle > 50 else 0.0
             status = PrinterStatus(
                 online=True,
                 state=self._state,
@@ -146,8 +153,16 @@ class SimulatorTransport(PrinterTransport):
                 if self._state in (STATE_PRINTING, STATE_PAUSED)
                 else None,
                 filename=self._filename,
-                part_fan=100.0 if self._state == STATE_PRINTING else 0.0,
-                aux_fan=60.0 if self._state == STATE_PRINTING else 0.0,
+                part_fan=part_fan,
+                aux_fan=aux_fan,
+                chamber_fan=chamber_fan,
+                fans=[
+                    # Regimes plausibles: ~85 tr/min par point de pourcentage.
+                    FanState("part", "Piece", part_fan, round(part_fan * 85), True),
+                    FanState("aux", "Auxiliaire", aux_fan, round(aux_fan * 72), True),
+                    FanState("chamber", "Chambre", chamber_fan, round(chamber_fan * 60), True),
+                    FanState(None, "Tete", hotend_fan, round(hotend_fan * 90), False),
+                ],
                 light_on=self._light,
                 speed_factor=100.0,
                 flow_factor=100.0,

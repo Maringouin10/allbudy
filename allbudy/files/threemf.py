@@ -10,6 +10,7 @@ Un 3MF est une archive ZIP. Deux cas se presentent:
 from __future__ import annotations
 
 import json
+import re
 import zipfile
 from pathlib import Path
 
@@ -106,6 +107,23 @@ def _parse_ini_config(raw: bytes, meta: GcodeMetadata) -> None:
             setattr(meta, key, value)
 
 
+def _count_build_items(raw: bytes) -> int | None:
+    """Nombre de pieces placees sur le plateau.
+
+    Dans un 3MF, `<build>` liste un `<item>` par instance posee: c'est ce qui
+    correspond au nombre de pieces imprimees, pas le nombre de maillages.
+    """
+    try:
+        text = raw.decode("utf-8", "replace")
+    except UnicodeDecodeError:  # pragma: no cover - decode ne leve pas en "replace"
+        return None
+    build = re.search(r"<build\b.*?</build>", text, re.S | re.I)
+    if not build:
+        return None
+    count = len(re.findall(r"<item\b", build.group(), re.I))
+    return count or None
+
+
 def extract_3mf_metadata(path: Path) -> tuple[GcodeMetadata, bytes | None]:
     meta = GcodeMetadata(printable=False, slicer=None)
     thumbnail: bytes | None = None
@@ -133,6 +151,10 @@ def extract_3mf_metadata(path: Path) -> tuple[GcodeMetadata, bytes | None]:
                     else:
                         _parse_ini_config(raw, meta)
                     break
+
+            # Le modele donne le nombre de pieces quand le G-code ne le dit pas.
+            if meta.object_count is None and "3D/3dmodel.model" in names:
+                meta.object_count = _count_build_items(archive.read("3D/3dmodel.model"))
 
             for name in _THUMB_NAMES:
                 if name in names:

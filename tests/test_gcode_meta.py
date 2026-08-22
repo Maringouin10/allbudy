@@ -140,3 +140,52 @@ def test_analyze_ne_leve_jamais(tmp_path: Path):
     meta, thumbnail = analyze(path, "3mf")
     assert "analysis_error" in meta
     assert thumbnail is None
+
+
+# --------------------------------------------------- nombre de pieces
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # Klipper: une definition par piece, emise en tete de fichier.
+        (
+            "EXCLUDE_OBJECT_DEFINE NAME=Cube_id_0\nEXCLUDE_OBJECT_DEFINE NAME=Cube_id_1\nG28\n",
+            2,
+        ),
+        # Meme piece definie deux fois: on ne compte pas deux fois.
+        ("EXCLUDE_OBJECT_DEFINE NAME=A\nEXCLUDE_OBJECT_DEFINE NAME=A\n", 1),
+        # M486: l'index le plus haut donne le compte, S-1 signale "hors objet".
+        ("M486 S0\nG1 X1\nM486 S1\nM486 S2\nM486 S-1\n", 3),
+        # Cura nomme chaque maillage; NONMESH n'est pas une piece.
+        (";MESH:a.stl\nG1\n;MESH:b.stl\n;MESH:NONMESH\n", 2),
+        # Orca/PrusaSlicer annoncent l'objet en cours.
+        ("; printing object Boitier\nG1\n; printing object Couvercle\n", 2),
+        ("G28\nG1 X10 Y10\n", None),
+    ],
+)
+def test_count_objects(text, expected):
+    from allbudy.files.gcode_meta import count_objects
+
+    assert count_objects(text) == expected
+
+
+def test_object_count_dans_les_metadonnees():
+    text = make_gcode() + "\nEXCLUDE_OBJECT_DEFINE NAME=P1\nEXCLUDE_OBJECT_DEFINE NAME=P2\n"
+    assert parse_gcode_text(text).object_count == 2
+
+
+def test_3mf_compte_les_pieces_du_plateau(tmp_path: Path):
+    """Dans un 3MF non tranche, le compte vient des items du plateau."""
+    import io
+    import zipfile
+
+    path = tmp_path / "plateau.3mf"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "3D/3dmodel.model",
+            "<model><resources><object id='1'/></resources>"
+            "<build><item objectid='1'/><item objectid='1'/><item objectid='1'/></build></model>",
+        )
+    path.write_bytes(buffer.getvalue())
+    meta, _ = extract_3mf_metadata(path)
+    assert meta.object_count == 3

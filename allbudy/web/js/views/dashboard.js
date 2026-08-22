@@ -1,5 +1,5 @@
 /** Tableau de bord: vue d'ensemble du parc. */
-import { api } from '../api.js';
+import { api, apiUrl } from '../api.js';
 import { printerCard, statCard } from '../components.js';
 import { on, printerList } from '../store.js';
 import { clear, el, emptyState, formatBytes, toastError } from '../ui.js';
@@ -8,16 +8,34 @@ export function dashboardView(navigate) {
   const statsRow = el('div', { class: 'grid stats' });
   const printersGrid = el('div', { class: 'grid printers' });
 
+  /**
+   * Index des fichiers de la bibliotheque par nom envoye a la machine.
+   * Il donne la miniature et le nombre de pieces du travail en cours: la
+   * machine ne renvoie qu'un nom de fichier.
+   */
+  let libraryByName = new Map();
+
   const root = el('div', {}, [
     el('div', { class: 'page-head' }, [
       el('h1', { text: 'Tableau de bord' }),
       el('div', { class: 'spacer' }),
-      el('button', { text: 'Actualiser', onClick: () => { refreshStats(); renderPrinters(); } }),
+      el('button', { text: 'Actualiser', onClick: () => { refreshStats(); loadLibrary(); } }),
     ]),
     statsRow,
     el('h2', { style: 'margin-top:1.5rem', text: 'Parc' }),
     printersGrid,
   ]);
+
+  function libraryEntry(filename) {
+    if (!filename) return {};
+    const name = String(filename).split('/').pop();
+    const file = libraryByName.get(name);
+    if (!file) return {};
+    return {
+      pieces: (file.meta || {}).object_count || null,
+      thumbnail: file.thumbnail ? apiUrl(`api/files/${file.id}/thumbnail`) : null,
+    };
+  }
 
   function renderPrinters() {
     const entries = printerList().sort((a, b) => a.printer_id - b.printer_id);
@@ -31,9 +49,23 @@ export function dashboardView(navigate) {
       return;
     }
     for (const entry of entries) {
+      const extra = libraryEntry(entry.status && entry.status.filename);
       printersGrid.append(printerCard(entry, {
         onOpen: (id) => navigate(`printer/${id}`),
+        pieces: extra.pieces,
+        thumbnail: extra.thumbnail,
       }));
+    }
+  }
+
+  async function loadLibrary() {
+    try {
+      const data = await api.files('?limit=500');
+      libraryByName = new Map(data.items.map((file) => [file.stored_name, file]));
+      renderPrinters();
+    } catch (error) {
+      // Sans la bibliotheque, les cartes restent affichables: on n'alerte pas.
+      console.warn('Index de la bibliotheque indisponible', error);
     }
   }
 
@@ -44,26 +76,34 @@ export function dashboardView(navigate) {
       statsRow.append(
         statCard('Imprimantes en ligne', `${stats.printers.online} / ${stats.printers.total}`,
           `${stats.printers.printing} en impression`),
+        statCard('Imprimantes libres', stats.printers.free ?? 0,
+          'prêtes à prendre un travail'),
         statCard('Travaux en file', stats.jobs.queued,
           stats.dispatcher_enabled ? 'Attribution active' : 'Attribution suspendue'),
-        statCard('Termines (7 j)', stats.jobs.completed_7d),
+        statCard('Pieces imprimees (7 j)', stats.jobs.pieces_7d ?? 0,
+          `${stats.jobs.completed_7d} plateau(x) termine(s)`),
+        statCard('Terminés (7 j)', stats.jobs.completed_7d, 'travaux'),
         statCard('Bibliotheque', stats.library.files, formatBytes(stats.library.bytes)),
-        statCard('Bobines suivies', stats.spools),
-        statCard('Disque libre', formatBytes(stats.disk.free), stats.platform),
       );
     } catch (error) {
       toastError(error);
     }
   }
 
-  const unsubscribe = on('printers', renderPrinters);
+  const unsubscribers = [
+    on('printers', renderPrinters),
+    // Un fichier ajoute ou retire change l'index des miniatures.
+    on('file.added', loadLibrary),
+    on('file.removed', loadLibrary),
+  ];
   root.cleanup = () => {
-    unsubscribe();
+    unsubscribers.forEach((fn) => fn());
     clearInterval(timer);
   };
 
   renderPrinters();
   refreshStats();
+  loadLibrary();
   const timer = setInterval(refreshStats, 20000);
   return root;
 }

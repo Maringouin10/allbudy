@@ -51,6 +51,27 @@ class SpoolState:
 
 
 @dataclass(slots=True)
+class FanState:
+    """Un ventilateur tel que rapporte par la machine.
+
+    `key` est l'identifiant de pilotage (`part`, `aux`, `chamber`); il vaut None
+    pour un ventilateur seulement observable, comme celui de la tete qui est
+    asservi a la temperature de la buse.
+    """
+
+    key: str | None
+    label: str
+    speed: float | None = None
+    """Vitesse en pourcentage (0-100)."""
+    rpm: float | None = None
+    """Regime mesure, si la machine dispose d'un capteur."""
+    controllable: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class PrinterStatus:
     """Instantane normalise de l'etat d'une imprimante."""
 
@@ -75,6 +96,8 @@ class PrinterStatus:
     part_fan: float | None = None
     aux_fan: float | None = None
     chamber_fan: float | None = None
+    fans: list[FanState] = field(default_factory=list)
+    """Detail de tous les ventilateurs detectes, y compris ceux non pilotables."""
     light_on: bool | None = None
 
     speed_factor: float | None = None

@@ -316,3 +316,57 @@ async def test_simulateur_refuse_double_impression(tmp_path):
     await transport.upload(source, "a.gcode", start=True)
     with pytest.raises(PrinterError):
         await transport.start_print("a.gcode")
+
+
+# ------------------------------------------------------------ ventilateurs
+def test_moonraker_detaille_les_ventilateurs():
+    """Vitesse, regime, et distinction pilotable / asservi au firmware."""
+    transport = MoonrakerTransport(config())
+    transport._available = [
+        "fan",
+        "fan_generic auxiliary_cooling_fan",
+        "fan_generic chamber_circulation_fan",
+        "heater_fan hotend_fan",
+    ]
+    transport._detect_objects()
+    assert transport._extra_fans == ["heater_fan hotend_fan"]
+
+    transport._objects = {
+        "fan": {"speed": 1.0, "rpm": 5100},
+        "fan_generic auxiliary_cooling_fan": {"speed": 0.6},
+        "fan_generic chamber_circulation_fan": {"speed": 0.0},
+        "heater_fan hotend_fan": {"speed": 1.0, "rpm": 7000},
+    }
+    fans = transport._build_status().fans
+    assert [f.label for f in fans] == ["Piece", "Auxiliaire", "Chambre", "Hotend fan"]
+
+    part = fans[0]
+    assert part.speed == 100.0 and part.rpm == 5100 and part.controllable is True
+    # Sans capteur de regime, le champ reste vide plutot que faux.
+    assert fans[1].speed == 60.0 and fans[1].rpm is None
+    # Le ventilateur de tete est asservi au firmware: observable, pas pilotable.
+    assert fans[3].key is None and fans[3].controllable is False
+
+
+def test_moonraker_sans_ventilateur():
+    assert moonraker_with_objects({})._build_status().fans == []
+
+
+async def test_lan_liste_les_ventilateurs():
+    transport = lan_with_payload({"fan": 1, "fanAuxiliary": 0, "fanCase": 1})
+    fans = (await transport.refresh()).fans
+    assert [(f.key, f.speed) for f in fans] == [
+        ("part", 100.0),
+        ("aux", 0.0),
+        ("chamber", 100.0),
+    ]
+    # Le protocole LAN n'expose aucun regime.
+    assert all(f.rpm is None for f in fans)
+
+
+async def test_simulateur_ventilateurs():
+    transport = SimulatorTransport(config(port=0))
+    await transport.connect()
+    idle = await transport.refresh()
+    assert [f.label for f in idle.fans] == ["Piece", "Auxiliaire", "Chambre", "Tete"]
+    assert all(f.speed == 0 for f in idle.fans)

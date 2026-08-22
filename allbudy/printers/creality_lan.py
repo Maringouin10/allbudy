@@ -36,6 +36,7 @@ from .base import (
     STATE_IDLE,
     STATE_PAUSED,
     STATE_PRINTING,
+    FanState,
     PrinterError,
     PrinterStatus,
     PrinterTransport,
@@ -259,12 +260,20 @@ class CrealityLanTransport(PrinterTransport):
         status.elapsed_time = as_int(elapsed) if elapsed is not None else None
         status.remaining_time = as_int(remaining) if remaining is not None else None
 
-        for field in ("part_fan", "aux_fan", "chamber_fan"):
+        for field, label, key in (
+            ("part_fan", "Piece", "part"),
+            ("aux_fan", "Auxiliaire", "aux"),
+            ("chamber_fan", "Chambre", "chamber"),
+        ):
             value = _pick(payload, field)
-            if value is not None:
-                # Selon les firmwares: interrupteur 0/1 ou pourcentage 0..100.
-                numeric = as_float(value)
-                setattr(status, field, 100.0 if numeric == 1 else round(numeric, 1))
+            if value is None:
+                continue
+            # Selon les firmwares: interrupteur 0/1 ou pourcentage 0..100.
+            numeric = as_float(value)
+            speed = 100.0 if numeric == 1 else round(numeric, 1)
+            setattr(status, field, speed)
+            # Le protocole LAN ne remonte aucun regime: seul l'etat est connu.
+            status.fans.append(FanState(key=key, label=label, speed=speed, controllable=True))
 
         light = _pick(payload, "light")
         if light is not None:

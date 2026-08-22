@@ -69,6 +69,20 @@ async def stats(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
         )
     ).scalar_one()
 
+    # Pieces reellement sorties: chaque exemplaire termine compte autant de
+    # pieces que le plateau en portait (1 par defaut si le fichier ne le dit pas).
+    pieces_week = 0
+    recent = (
+        await session.execute(
+            select(Job.copies_done, GcodeFile.meta)
+            .join(GcodeFile, Job.file_id == GcodeFile.id)
+            .where(Job.status == JobStatus.COMPLETED.value, Job.finished_at >= since)
+        )
+    ).all()
+    for copies_done, meta in recent:
+        per_plate = (meta or {}).get("object_count") or 1
+        pieces_week += int(copies_done or 0) * int(per_plate)
+
     files_count = (await session.execute(select(func.count(GcodeFile.id)))).scalar_one()
     files_bytes = (await session.execute(select(func.sum(GcodeFile.size)))).scalar() or 0
     spools_count = (await session.execute(select(func.count(Spool.id)))).scalar_one()
@@ -80,11 +94,14 @@ async def stats(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
             "total": printers_count,
             "online": sum(1 for s in snapshot if s["connected"]),
             "printing": len(printing),
+            # Libres = connectees et pretes a prendre un travail tout de suite.
+            "free": sum(1 for s in snapshot if s["connected"] and s["status"]["is_free"]),
         },
         "jobs": {
             "counts": job_counts,
             "queued": job_counts.get(JobStatus.QUEUED.value, 0),
             "completed_7d": completed_week,
+            "pieces_7d": pieces_week,
         },
         "library": {"files": files_count, "bytes": int(files_bytes)},
         "spools": spools_count,

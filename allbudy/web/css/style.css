@@ -206,6 +206,103 @@ label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: .2
 .slot.active { border-color: var(--accent); }
 .slot.empty { opacity: .45; }
 
+/* ------------------------------------------------------ etat de connexion */
+.link-state {
+  display: flex; align-items: center; gap: .4rem;
+  font-size: .78rem; font-weight: 600;
+  padding: .3rem .5rem; border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.link-state .led { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.link-state.up { color: var(--ok); }
+.link-state.up .led { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.link-state.down { color: var(--muted); }
+.link-state.down .led { background: var(--err); }
+.link-sep { color: var(--line); }
+.printer-card.offline { opacity: .82; }
+.card-error {
+  background: rgba(231, 76, 60, .1); border: 1px solid rgba(231, 76, 60, .3);
+  color: #ff9c93; border-radius: var(--radius-sm); padding: .45rem .6rem;
+}
+
+.card-section { display: flex; flex-direction: column; gap: .45rem; }
+.section-title {
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .6px;
+  color: var(--muted); font-weight: 700;
+}
+.card-actions { padding-top: .2rem; border-top: 1px solid var(--line); margin-top: .1rem; }
+
+/* --------------------------------------------------- encart d'impression */
+.print-box {
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: .6rem; display: flex;
+  flex-direction: column; gap: .6rem;
+}
+.print-head { display: flex; gap: .6rem; align-items: center; }
+.print-thumb {
+  width: 56px; height: 56px; flex: 0 0 auto; border-radius: var(--radius-sm);
+  object-fit: contain; background: var(--panel-2); border: 1px solid var(--line);
+}
+.print-thumb.ph { display: flex; align-items: center; justify-content: center; font-size: 1.6rem; opacity: .35; }
+.print-title { min-width: 0; flex: 1; }
+.print-progress-row { display: flex; align-items: center; gap: .5rem; margin-top: .4rem; }
+.print-progress-row .progress-line { flex: 1; }
+.print-pct { font-size: .8rem; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--accent); }
+
+.print-stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: .3rem .7rem;
+}
+.stat-line { display: flex; justify-content: space-between; gap: .4rem; font-size: .8rem; }
+.stat-line .k { color: var(--muted); }
+.stat-line .v { font-weight: 620; font-variant-numeric: tabular-nums; }
+.stat-line .v.accent { color: var(--accent); }
+
+/* ------------------------------------------------------------ ventilateurs */
+.fan-panel { display: flex; flex-direction: column; gap: .5rem; }
+.fan-row {
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: .4rem .55rem;
+  display: flex; flex-direction: column; gap: .3rem;
+}
+.fan-head { display: flex; align-items: center; gap: .4rem; font-size: .8rem; }
+.fan-name { flex: 1; min-width: 0; }
+.fan-value { font-weight: 650; font-variant-numeric: tabular-nums; }
+.fan-rpm { color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
+.fan-readonly { font-size: .7rem; color: var(--muted); font-style: italic; }
+.fan-icon { color: var(--muted); font-size: .8rem; display: inline-block; }
+.fan-icon.spinning { color: var(--info); animation: spin 1.4s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.fan-gauge { height: 4px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+.fan-gauge > div { height: 100%; background: var(--info); transition: width .4s; }
+.fan-actions { display: flex; gap: .25rem; }
+.fan-actions button { flex: 1; padding: .18rem 0; font-size: .74rem; }
+
+/* -------------------------------------------------------------------- CFS */
+.cfs-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(58px, 1fr)); gap: .4rem; }
+.cfs-panel.compact { grid-template-columns: repeat(auto-fit, minmax(46px, 1fr)); }
+.cfs-slot {
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: .35rem .25rem; display: flex; flex-direction: column;
+  align-items: center; gap: .3rem;
+}
+.cfs-slot.active { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(242,121,13,.25) inset; }
+.cfs-slot.empty { opacity: .45; }
+.cfs-spool {
+  position: relative; width: 30px; height: 34px; border-radius: 5px;
+  background: var(--panel-2); border: 1px solid var(--line);
+  overflow: hidden; display: flex; align-items: flex-end;
+}
+.cfs-fill { width: 100%; transition: height .5s; opacity: .92; }
+.cfs-active-dot {
+  position: absolute; top: 3px; right: 3px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent);
+}
+.cfs-label { text-align: center; width: 100%; }
+.cfs-mat { font-size: .68rem; font-weight: 640; line-height: 1.2; }
+.cfs-pct { font-size: .65rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.stat-card .stat-value { font-size: 1.6rem; font-weight: 650; line-height: 1.2; }
+
 /* ------------------------------------------------------------ file/table */
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 th, td { padding: .55rem .6rem; text-align: left; border-bottom: 1px solid var(--line); }
@@ -280,10 +377,6 @@ td.actions { text-align: right; white-space: nowrap; }
 .conn-state { display: flex; align-items: center; gap: .45rem; font-size: .78rem; color: var(--muted); padding: .5rem .7rem; }
 .conn-state .led { width: 8px; height: 8px; border-radius: 50%; background: var(--err); }
 .conn-state.live .led { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-
-/* ------------------------------------------------------------------ login */
-.login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; width: 100%; }
-.login-box { width: min(380px, 100%); }
 
 .empty-state { text-align: center; padding: 2.5rem 1rem; color: var(--muted); }
 .empty-state .big { font-size: 2.2rem; opacity: .35; margin-bottom: .5rem; }

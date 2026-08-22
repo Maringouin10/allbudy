@@ -13,6 +13,7 @@ function fileMetaLines(file) {
   if (meta.print_time_s) lines.push(`⏱ ${formatDuration(meta.print_time_s)}`);
   if (meta.filament_used_g) lines.push(`⚖ ${Math.round(meta.filament_used_g)} g`);
   if (meta.layer_count) lines.push(`▤ ${meta.layer_count} couches`);
+  if (meta.object_count) lines.push(`⬛ ${meta.object_count} piece(s)`);
   if (meta.nozzle_diameter) lines.push(`⌀ ${meta.nozzle_diameter} mm`);
   return lines;
 }
@@ -129,6 +130,7 @@ export function filesView() {
           ['Temps estime', meta.print_time_s ? formatDuration(meta.print_time_s) : '—'],
           ['Filament', meta.filament_used_g ? `${Math.round(meta.filament_used_g)} g` : '—'],
           ['Couches', meta.layer_count || '—'],
+          ['Pieces sur le plateau', meta.object_count || 'non indique par le trancheur'],
           ['Hauteur de couche', meta.layer_height ? `${meta.layer_height} mm` : '—'],
           ['Buse', meta.nozzle_diameter ? `${meta.nozzle_diameter} mm` : '—'],
           ['Materiaux', (meta.filament_types || []).join(', ') || '—'],
