@@ -79,6 +79,8 @@ async def create_job(payload: JobCreate, session: AsyncSession = Depends(get_ses
         if payload.printer_id is not None
         else payload.allowed_printers,
         auto_start=payload.auto_start,
+        bed_leveling=payload.bed_leveling,
+        scheduled_at=payload.scheduled_at,
     )
     session.add(job)
     await session.commit()

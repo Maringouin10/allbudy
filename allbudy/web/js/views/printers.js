@@ -1,5 +1,6 @@
 /** Gestion du parc: ajout, edition, decouverte reseau. */
 import { api } from '../api.js';
+import { printerIcon } from '../components.js';
 import {
   badge, clear, confirmDialog, el, field, emptyState, modal, run, toast, toastError,
 } from '../ui.js';
@@ -19,6 +20,31 @@ function printerForm(printer = {}) {
 
   form.name = el('input', { value: printer.name || '', placeholder: 'Atelier K1 #1' });
   form.model = el('input', { value: printer.model || 'K1', placeholder: 'K1 Max, K2 Plus, Ender-3 V3...' });
+  // Detection reelle en LAN Creality, heuristique best-effort en Moonraker:
+  // n'a de sens que pour une machine deja enregistree (on a besoin de son
+  // hote/port en base pour l'interroger).
+  const detectButton = printer.id
+    ? el('button', {
+        type: 'button', class: 'sm',
+        text: 'Detecter',
+        onClick: async () => {
+          detectButton.disabled = true;
+          try {
+            const result = await api.detectPrinterModel(printer.id);
+            if (result.model) {
+              form.model.value = result.model;
+              toast(`Modele detecte: ${result.model}`, 'ok');
+            } else {
+              toast('Modele non detectable automatiquement sur cette machine — saisissez-le', 'warn');
+            }
+          } catch (error) {
+            toastError(error);
+          } finally {
+            detectButton.disabled = false;
+          }
+        },
+      })
+    : null;
   form.transport = el('select', {}, TRANSPORTS.map(([value, label]) =>
     el('option', { value, text: label, selected: (printer.transport || 'moonraker') === value })));
   form.host = el('input', { value: printer.host || '', placeholder: '192.168.1.42' });
@@ -41,7 +67,12 @@ function printerForm(printer = {}) {
   body.append(
     field('Nom', form.name),
     el('div', { class: 'field-row' }, [
-      field('Modele', form.model),
+      field('Modele', detectButton
+        ? el('div', { class: 'row', style: 'gap:.4rem' }, [
+          el('div', { style: 'flex:1' }, [form.model]),
+          detectButton,
+        ])
+        : form.model),
       field('Protocole', form.transport),
     ]),
     el('div', { class: 'field-row' }, [
@@ -112,8 +143,11 @@ export function printersView(navigate) {
         const state = live && live.connected ? live.status.state : 'offline';
         tbody.append(el('tr', {}, [
           el('td', {}, [
-            el('a', { href: `#/printer/${printer.id}`, text: printer.name }),
-            printer.enabled ? null : el('span', { class: 'badge', text: 'desactivee', style: 'margin-left:.4rem' }),
+            el('div', { class: 'row', style: 'gap:.5rem' }, [
+              printerIcon(printer.model, { size: 24 }),
+              el('a', { href: `#/printer/${printer.id}`, text: printer.name }),
+              printer.enabled ? null : el('span', { class: 'badge', text: 'desactivee' }),
+            ]),
           ]),
           el('td', { text: printer.model }),
           el('td', { class: 'small muted', text: printer.transport }),
@@ -185,9 +219,13 @@ export function printersView(navigate) {
               }
               for (const found of data.results) {
                 results.append(el('div', { class: 'queue-item' }, [
+                  printerIcon(found.model, { size: 28 }),
                   el('div', { class: 'grow' }, [
                     el('div', { text: found.name || found.host }),
                     el('div', { class: 'small muted', text: `${found.host}:${found.port} — ${found.transport}${found.firmware ? ` — ${found.firmware}` : ''}` }),
+                    found.model
+                      ? el('div', { class: 'small', style: 'color:var(--accent)', text: `Modele detecte: ${found.model}` })
+                      : el('div', { class: 'small muted', text: 'Modele non detectable automatiquement — a preciser apres ajout' }),
                   ]),
                   found.known
                     ? el('span', { class: 'badge', text: 'deja ajoutee' })

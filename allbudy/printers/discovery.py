@@ -66,6 +66,31 @@ async def _port_open(host: str, port: int, timeout: float) -> bool:
     return True
 
 
+#: Hostnames par defaut de certaines images Creality/Klipper, associes au
+#: vrai nom commercial de la machine. Moonraker n'expose pas le modele: c'est
+#: une heuristique best-effort sur le nom d'hote, pas une lecture fiable -
+#: sans correspondance connue on renvoie None plutot qu'un hostname arbitraire
+#: pris a tort pour un modele.
+_MOONRAKER_MODEL_HINTS = {
+    "k1max": "K1 Max",
+    "k1c": "K1C",
+    "k1": "K1",
+    "k2plus": "K2 Plus",
+    "k2": "K2",
+    "ender3v3ke": "Ender-3 V3 KE",
+    "ender3v3plus": "Ender-3 V3 Plus",
+    "ender3v3se": "Ender-3 V3 SE",
+    "ender3v3": "Ender-3 V3",
+}
+
+
+def _guess_model_from_hostname(hostname: str | None) -> str | None:
+    if not hostname:
+        return None
+    slug = "".join(ch for ch in hostname.lower() if ch.isalnum())
+    return _MOONRAKER_MODEL_HINTS.get(slug)
+
+
 async def _identify_moonraker(host: str, port: int, timeout: float) -> Candidate | None:
     url = f"http://{host}:{port}/printer/info"
     try:
@@ -76,12 +101,13 @@ async def _identify_moonraker(host: str, port: int, timeout: float) -> Candidate
             result = (response.json() or {}).get("result", {})
     except (httpx.HTTPError, ValueError):
         return None
+    hostname = result.get("hostname")
     return Candidate(
         host=host,
         port=port,
         transport=TransportKind.MOONRAKER.value,
-        name=result.get("hostname"),
-        model=result.get("hostname"),
+        name=hostname,
+        model=_guess_model_from_hostname(hostname),
         firmware=result.get("software_version"),
     )
 
@@ -121,6 +147,23 @@ _IDENTIFIERS = {
     7125: _identify_moonraker,
     9999: _identify_creality_lan,
 }
+
+
+async def identify_model(
+    host: str, port: int, transport: str, timeout: float | None = None
+) -> str | None:
+    """Redetecte le modele d'une imprimante deja configuree, a la demande.
+
+    Contrairement au balayage reseau, on sait deja quel protocole utiliser:
+    inutile de deviner via le port.
+    """
+    settings = get_settings()
+    timeout = timeout or settings.discovery_timeout
+    if transport == TransportKind.CREALITY_LAN.value:
+        candidate = await _identify_creality_lan(host, port, timeout)
+    else:
+        candidate = await _identify_moonraker(host, port, timeout)
+    return candidate.model if candidate else None
 
 
 async def scan(

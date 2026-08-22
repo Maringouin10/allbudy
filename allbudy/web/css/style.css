@@ -232,6 +232,13 @@ label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: .2
 }
 .card-actions { padding-top: .2rem; border-top: 1px solid var(--line); margin-top: .1rem; }
 
+.printer-icon {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); color: var(--accent); border-radius: var(--radius-sm);
+  padding: 5px; box-sizing: border-box;
+}
+.printer-icon svg { width: 100%; height: 100%; }
+
 /* --------------------------------------------------- encart d'impression */
 .print-box {
   background: var(--bg); border: 1px solid var(--line);

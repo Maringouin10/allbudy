@@ -1,10 +1,10 @@
 /** Bibliotheque de fichiers tranches. */
 import { api, apiUrl } from '../api.js';
-import { materialChip } from '../components.js';
-import { printNowModal } from './printer.js';
+import { materialChip, printerIcon } from '../components.js';
+import { printerState } from '../store.js';
 import {
-  clear, confirmDialog, el, emptyState, field, formatBytes, formatDate, formatDuration, modal,
-  run, toast, toastError,
+  badge, clear, confirmDialog, el, emptyState, field, formatBytes, formatDate, formatDuration,
+  modal, run, toast, toastError,
 } from '../ui.js';
 
 function fileMetaLines(file) {
@@ -227,8 +227,7 @@ export function filesView() {
     ]);
 
     const actions = el('div', { class: 'row', style: 'gap:.3rem' }, [
-      el('button', { class: 'sm primary', text: 'File', title: 'Ajouter a la file d\'attente', onClick: () => queueModal(file) }),
-      el('button', { class: 'sm', text: 'Imprimer', onClick: () => printNowModal(file, refresh) }),
+      el('button', { class: 'sm primary', text: '🖨 Imprimer', onClick: () => printModal(file, refresh) }),
       el('button', { class: 'sm ghost', text: '⋯', onClick: () => detailsModal(file) }),
     ]);
 
@@ -352,9 +351,17 @@ function colorSlotField(index, total, meta, inventory, spoolById) {
     manualRow.style.display = select.value === 'manual' ? 'flex' : 'none';
   });
 
-  const node = el('div', { class: 'field' }, [
-    el('label', { text: total > 1 ? `Couleur ${index + 1}` : 'Bobine' }),
-    select,
+  const dot = el('span', {
+    style: `width:13px;height:13px;border-radius:50%;flex:none;background:${fileColor || '#7f8c8d'};border:1px solid rgba(255,255,255,.25)`,
+  });
+  const node = el('div', {}, [
+    el('div', { class: 'row', style: 'gap:.5rem;flex-wrap:nowrap' }, [
+      dot,
+      el('span', { class: 'small nowrap', style: 'min-width:80px', text: total > 1 ? `Couleur ${index + 1}` : 'Bobine' }),
+      el('span', { class: 'small muted nowrap', text: fileMaterial || '?' }),
+      el('span', { class: 'small muted', text: '→' }),
+      el('div', { style: 'flex:1;min-width:0' }, [select]),
+    ]),
     manualRow,
   ]);
 
@@ -371,55 +378,175 @@ function colorSlotField(index, total, meta, inventory, spoolById) {
   return { node, read };
 }
 
-/** Modale d'ajout a la file, avec contraintes d'attribution. */
-export function queueModal(file, onDone) {
+function sectionBlock(title, ...content) {
+  return el('div', { class: 'card-section' }, [
+    el('div', { class: 'section-title', text: title }),
+    ...content,
+  ]);
+}
+
+/** Ligne « carte imprimante » du selecteur de cible. */
+function printerPickRow(printer, { selectable, selected, onClick }) {
+  const live = printerState(printer.id);
+  const connected = !!(live && live.connected);
+  const state = connected ? live.status.state : 'offline';
+  return el('div', {
+    class: 'queue-item',
+    style: `${selectable ? 'cursor:pointer;' : ''}border-color:${selected ? 'var(--accent)' : 'var(--line)'}`,
+    onClick: selectable ? onClick : null,
+  }, [
+    printerIcon(printer.model, { size: 30 }),
+    el('div', { class: 'grow' }, [
+      el('div', {}, [el('strong', { text: printer.name })]),
+      el('div', { class: 'small muted', text: `${printer.model || '?'} · ${printer.host}` }),
+    ]),
+    badge(state),
+    selected ? el('span', { style: 'color:var(--accent);font-weight:700', text: '✓' }) : null,
+  ]);
+}
+
+/** Modale unique « Imprimer »: cible, bobines, options, quand imprimer. */
+export function printModal(file, onDone) {
   const meta = file.meta || {};
   // Les champs sont gardes dans la fermeture: les relire par position dans le
   // DOM casserait au moindre changement de mise en page.
   const copies = el('input', { type: 'number', min: 1, value: 1 });
-  const priority = el('input', { type: 'number', value: 0 });
   const tolerance = el('input', { type: 'range', min: 0, max: 160, value: 40 });
   const nozzle = el('input', { type: 'number', step: '0.05', value: meta.nozzle_diameter || '' });
   const tags = el('input', { placeholder: 'chambre-chauffee, grande-plaque' });
-  const printerSelect = el('select', {}, [el('option', { value: '', text: 'N\'importe laquelle (matching auto)' })]);
   const filamentsBox = el('div', { class: 'col' }, [el('p', { class: 'small muted', text: 'Chargement des bobines...' })]);
   const spoolById = new Map();
   let colorSlots = [];
 
+  let printers = [];
+  let targetMode = 'specific';
+  let selectedPrinterId = null;
+  let showAllModels = false;
+  const targetToggle = el('div', { class: 'row', style: 'gap:.4rem' });
+  const printerBox = el('div', { class: 'col', style: 'gap:.4rem' });
+
+  let bedLeveling = false;
+  const bedLevelToggle = el('div', { class: 'row', style: 'gap:.4rem' });
+
+  let whenMode = 'asap';
+  const whenToggle = el('div', { class: 'row', style: 'gap:.4rem' });
+  const scheduleInput = el('input', { type: 'datetime-local' });
+  const scheduleRow = el('div', { style: 'margin-top:.5rem;display:none' }, [field('Date et heure', scheduleInput)]);
+
+  function primaryModel() {
+    if (selectedPrinterId) {
+      const chosen = printers.find((p) => p.id === selectedPrinterId);
+      if (chosen) return chosen.model;
+    }
+    const online = printers.filter((p) => { const live = printerState(p.id); return live && live.connected; });
+    const pool = online.length ? online : printers;
+    const counts = new Map();
+    for (const p of pool) counts.set(p.model, (counts.get(p.model) || 0) + 1);
+    let best = null;
+    for (const [model, count] of counts) {
+      if (!best || count > best[1]) best = [model, count];
+    }
+    return best ? best[0] : null;
+  }
+
+  function renderTargeting() {
+    const model = primaryModel();
+    clear(targetToggle).append(
+      el('button', {
+        class: `sm ${targetMode === 'specific' ? 'primary' : ''}`,
+        text: '🖨 Imprimante specifique',
+        onClick: () => { targetMode = 'specific'; renderTargeting(); },
+      }),
+      el('button', {
+        class: `sm ${targetMode === 'any' ? 'primary' : ''}`,
+        text: model ? `👥 N'importe quelle ${model}` : '👥 N\'importe laquelle',
+        onClick: () => { targetMode = 'any'; renderTargeting(); },
+      }),
+    );
+
+    const group = showAllModels ? printers : printers.filter((p) => p.model === model);
+    const hidden = printers.length - group.length;
+
+    clear(printerBox);
+    if (!printers.length) {
+      printerBox.append(el('p', { class: 'small muted', text: 'Aucune imprimante configuree.' }));
+    }
+    for (const printer of group) {
+      const selected = targetMode === 'specific' ? selectedPrinterId === printer.id : true;
+      printerBox.append(printerPickRow(printer, {
+        selectable: targetMode === 'specific',
+        selected,
+        onClick: () => { selectedPrinterId = printer.id; renderTargeting(); },
+      }));
+    }
+    if (hidden > 0 && !showAllModels) {
+      printerBox.append(el('div', { class: 'small muted' }, [
+        `⚠ ${hidden} autre(s) imprimante(s) masquee(s) (modele different) — `,
+        el('a', { href: '#', text: 'tout afficher', onClick: (event) => { event.preventDefault(); showAllModels = true; renderTargeting(); } }),
+      ]));
+    }
+  }
+
+  function renderBedLevel() {
+    clear(bedLevelToggle).append(
+      el('button', { class: `sm ${!bedLeveling ? 'primary' : ''}`, text: 'Off', onClick: () => { bedLeveling = false; renderBedLevel(); } }),
+      el('button', { class: `sm ${bedLeveling ? 'primary' : ''}`, text: 'On', onClick: () => { bedLeveling = true; renderBedLevel(); } }),
+    );
+  }
+
+  function renderWhen() {
+    clear(whenToggle).append(
+      el('button', { class: `sm ${whenMode === 'asap' ? 'primary' : ''}`, text: '⏱ Des que possible', onClick: () => { whenMode = 'asap'; renderWhen(); } }),
+      el('button', { class: `sm ${whenMode === 'queue' ? 'primary' : ''}`, text: '📋 File d\'attente', onClick: () => { whenMode = 'queue'; renderWhen(); } }),
+      el('button', { class: `sm ${whenMode === 'schedule' ? 'primary' : ''}`, text: '📅 Programmer', onClick: () => { whenMode = 'schedule'; renderWhen(); } }),
+    );
+    scheduleRow.style.display = whenMode === 'schedule' ? 'block' : 'none';
+  }
+
   modal({
-    title: `Mettre « ${file.filename} » en file`,
-    submitLabel: 'Ajouter a la file',
+    title: `🖨 Imprimer « ${file.filename} »`,
+    submitLabel: '🖨 Imprimer',
+    wide: true,
     render: async (body) => {
       body.append(
-        el('p', { class: 'small muted', text: 'Le travail partira vers la premiere imprimante libre qui remplit ces conditions.' }),
+        sectionBlock('Travail', el('div', { class: 'truncate', text: file.filename })),
+        sectionBlock('Imprimante', targetToggle, printerBox),
+        sectionBlock('Bobines exigees',
+          el('p', { class: 'small muted', style: 'margin:0 0 .5rem', text: 'Choisissez une bobine deja chargee par le passe pour fixer sa couleur au lieu de deviner, ou laissez « Auto » pour vous fier au fichier.' }),
+          filamentsBox),
+        sectionBlock('Options d\'impression',
+          el('div', {}, [
+            el('div', { class: 'small muted', style: 'margin-bottom:.3rem', text: 'Nivellement du plateau avant impression' }),
+            bedLevelToggle,
+          ])),
         el('div', { class: 'field-row' }, [
           field('Exemplaires', copies),
-          field('Priorite', priority, 'Plus grand = envoye avant'),
         ]),
-        el('div', { class: 'field' }, [
-          el('label', { text: 'Bobines exigees' }),
-          el('p', { class: 'small muted', style: 'margin:.2rem 0 .5rem', text: 'Choisissez une bobine deja chargee par le passe pour fixer sa couleur au lieu de deviner, ou laissez « Auto » pour vous fier au fichier.' }),
-          filamentsBox,
-          el('div', { class: 'row', style: 'margin-top:.4rem' }, [
-            el('div', { style: 'flex:1' }, [
-              el('label', { text: 'Tolerance de teinte' }),
-              tolerance,
-            ]),
+        sectionBlock('Quand imprimer', whenToggle, scheduleRow),
+        sectionBlock('Autres criteres',
+          el('div', { class: 'row', style: 'margin-bottom:.5rem' }, [
+            el('div', { style: 'flex:1' }, [el('label', { class: 'small muted', text: 'Tolerance de teinte' }), tolerance]),
           ]),
-        ]),
-        el('div', { class: 'field-row' }, [
-          field('Buse exigee (mm)', nozzle),
-          field('Etiquettes exigees', tags),
-        ]),
-        field('Imprimante imposee', printerSelect),
+          el('div', { class: 'field-row' }, [
+            field('Buse exigee (mm)', nozzle),
+            field('Etiquettes exigees', tags),
+          ])),
       );
+
+      renderBedLevel();
+      renderWhen();
+
       try {
-        for (const printer of await api.printers()) {
-          printerSelect.append(el('option', { value: printer.id, text: printer.name }));
-        }
+        printers = await api.printers();
+        const model = primaryModel();
+        const initial = printers.filter((p) => p.model === model)
+          .find((p) => { const live = printerState(p.id); return live && live.connected && live.status.is_free; });
+        selectedPrinterId = (initial || printers.find((p) => p.model === model) || printers[0] || {}).id || null;
       } catch (error) {
         toastError(error);
       }
+      renderTargeting();
+
       try {
         const inventory = await api.spoolInventory();
         const total = Math.max((meta.filament_types || []).length, (meta.filament_colors || []).length, 1);
@@ -433,16 +560,48 @@ export function queueModal(file, onDone) {
       }
     },
     onSubmit: async () => {
+      if (!printers.length) {
+        toast('Aucune imprimante configuree', 'warn');
+        return false;
+      }
+      let printerId = null;
+      let allowedPrinters = [];
+      if (targetMode === 'specific') {
+        if (!selectedPrinterId) {
+          toast('Choisissez une imprimante', 'warn');
+          return false;
+        }
+        printerId = selectedPrinterId;
+      } else {
+        const model = primaryModel();
+        const group = printers.filter((p) => p.model === model);
+        if (group.length && group.length < printers.length) allowedPrinters = group.map((p) => p.id);
+      }
+
+      let priority = 0;
+      let scheduledAt = null;
+      if (whenMode === 'asap') priority = 1000;
+      if (whenMode === 'schedule') {
+        if (!scheduleInput.value) {
+          toast('Choisissez une date de programmation', 'warn');
+          return false;
+        }
+        scheduledAt = new Date(scheduleInput.value).toISOString();
+      }
+
       const overrides = colorSlots.map((slot) => slot.read());
       await api.post('api/jobs', {
         file_id: file.id,
         copies: Number(copies.value) || 1,
-        priority: Number(priority.value) || 0,
+        priority,
+        scheduled_at: scheduledAt,
+        bed_leveling: bedLeveling,
         required_filaments: overrides.some(Boolean) ? overrides : [],
         color_tolerance: Number(tolerance.value),
         required_nozzle: nozzle.value ? Number(nozzle.value) : null,
         required_tags: tags.value.split(',').map((t) => t.trim()).filter(Boolean),
-        printer_id: printerSelect.value ? Number(printerSelect.value) : null,
+        printer_id: printerId,
+        allowed_printers: allowedPrinters,
       });
       toast('Travail ajoute a la file', 'ok');
       if (onDone) onDone();

@@ -198,6 +198,10 @@ class Job(Base):
     copies: Mapped[int] = mapped_column(Integer, default=1)
     copies_done: Mapped[int] = mapped_column(Integer, default=0)
     auto_start: Mapped[bool] = mapped_column(Boolean, default=True)
+    bed_leveling: Mapped[bool] = mapped_column(Boolean, default=False)
+    """Lance une calibration du maillage du plateau avant l'impression."""
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    """Le travail n'est propose au dispatcher qu'a partir de cette date."""
 
     progress: Mapped[float] = mapped_column(Float, default=0.0)
     remote_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)

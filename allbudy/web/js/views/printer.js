@@ -1,10 +1,9 @@
 /** Pilotage detaille d'une imprimante. */
 import { api, apiUrl } from '../api.js';
-import { cfsSection, fanPanel } from '../components.js';
+import { cfsSection, fanPanel, printerIcon } from '../components.js';
 import { on, printerState } from '../store.js';
 import {
-  badge, clear, confirmDialog, el, field, formatBytes, formatDuration, formatTemp, modal, run,
-  toast, toastError,
+  badge, clear, confirmDialog, el, formatBytes, formatDuration, formatTemp, run, toastError,
 } from '../ui.js';
 
 const JOG_STEPS = [0.1, 1, 10, 50];
@@ -41,6 +40,7 @@ export function printerDetailView(printerId, navigate) {
     const state = live && live.connected ? live.status.state : 'offline';
     clear(header).append(
       el('button', { class: 'ghost', text: '← Parc', onClick: () => navigate('dashboard') }),
+      printerIcon(printer ? printer.model : null),
       el('h1', { text: printer ? printer.name : `Imprimante #${id}` }),
       badge(state),
       el('div', { class: 'spacer' }),
@@ -346,48 +346,3 @@ export function printerDetailView(printerId, navigate) {
   load();
   return root;
 }
-
-/** Modale « imprimer maintenant »: choisit une machine libre pour un fichier. */
-export function printNowModal(file, onDone) {
-  modal({
-    title: `Imprimer « ${file.filename} »`,
-    submitLabel: 'Envoyer et lancer',
-    render: async (body) => {
-      body.append(el('p', { class: 'small muted', text: 'Envoi direct, sans passer par la file d\'attente. La machine doit etre disponible.' }));
-      const select = el('select');
-      body.append(field('Imprimante', select));
-      try {
-        const printers = await api.printers();
-        for (const printer of printers) {
-          const live = printerState(printer.id);
-          const free = live && live.connected && live.status.is_free;
-          select.append(el('option', {
-            value: printer.id,
-            text: `${printer.name}${free ? '' : ' (indisponible)'}`,
-            disabled: !free,
-          }));
-        }
-        if (!select.querySelector('option:not([disabled])')) {
-          body.append(el('p', { style: 'color:var(--warn)', class: 'small', text: 'Aucune imprimante disponible pour le moment.' }));
-        }
-      } catch (error) {
-        toastError(error);
-      }
-      body.dataset.ready = '1';
-      body.select = select;
-    },
-    onSubmit: async (body) => {
-      const select = body.querySelector('select');
-      if (!select || !select.value) {
-        toast('Choisissez une imprimante', 'warn');
-        return false;
-      }
-      await api.post(`api/printers/${select.value}/print`, { file_id: file.id, start: true });
-      toast('Impression lancee', 'ok');
-      if (onDone) onDone();
-      return true;
-    },
-  });
-}
-
-export { apiUrl };

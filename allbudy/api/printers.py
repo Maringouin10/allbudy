@@ -13,7 +13,7 @@ from ..events import record_event
 from ..files.store import local_path
 from ..models import ACTIVE_JOB_STATUSES, GcodeFile, Job, JobStatus, Printer, TransportKind
 from ..printers.base import PrinterError
-from ..printers.discovery import default_network, scan
+from ..printers.discovery import default_network, identify_model, scan
 from ..printers.manager import DEFAULT_PORTS, manager
 from ..queueing import scheduler
 from ..schemas import (
@@ -125,6 +125,21 @@ async def discover_post(
             for candidate in candidates
         ],
     }
+
+
+@router.post("/{printer_id}/detect-model")
+async def detect_model(
+    printer_id: int, session: AsyncSession = Depends(get_session)
+) -> dict[str, Any]:
+    """Interroge la machine pour retrouver son vrai modele commercial.
+
+    Fiable en LAN Creality (le protocole le rapporte); best-effort en
+    Moonraker (heuristique sur le nom d'hote). Renvoie `model: null` plutot
+    que de deviner quand rien de fiable n'est trouve.
+    """
+    printer = await _get_printer(session, printer_id)
+    model = await identify_model(printer.host, printer.port, printer.transport)
+    return {"model": model}
 
 
 @router.get("/status")

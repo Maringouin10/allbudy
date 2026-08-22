@@ -90,6 +90,7 @@ export const api = {
   printers: () => request('GET', 'api/printers'),
   printerStatus: () => request('GET', 'api/printers/status'),
   printerCommand: (id, action, body) => request('POST', `api/printers/${id}/${action}`, { body }),
+  detectPrinterModel: (id) => request('POST', `api/printers/${id}/detect-model`),
 
   files: (params = '') => request('GET', `api/files${params}`),
   jobs: (params = '') => request('GET', `api/jobs${params}`),

@@ -182,6 +182,9 @@ class JobCreate(BaseModel):
     auto_start: bool = True
     printer_id: int | None = None
     """Force l'envoi sur une machine precise (court-circuite le matching)."""
+    bed_leveling: bool = False
+    scheduled_at: datetime | None = None
+    """Le travail n'est propose au dispatcher qu'a partir de cette date."""
 
     @field_validator("required_color")
     @classmethod
@@ -202,6 +205,8 @@ class JobUpdate(BaseModel):
     required_tags: list[str] | None = None
     allowed_printers: list[int] | None = None
     auto_start: bool | None = None
+    bed_leveling: bool | None = None
+    scheduled_at: datetime | None = None
     status: JobStatus | None = None
 
     @field_validator("required_color")
@@ -224,6 +229,8 @@ class JobOut(BaseModel):
     copies_done: int
     progress: float
     auto_start: bool
+    bed_leveling: bool
+    scheduled_at: datetime | None
     required_material: str | None
     required_color: str | None
     required_filaments: list[Any]

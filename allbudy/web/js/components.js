@@ -221,6 +221,43 @@ export function temperatureCells(status) {
   ].filter(Boolean));
 }
 
+/* ----------------------------------------------------------- icone modele */
+
+/**
+ * Silhouettes abstraites par famille de machine (pas de photo produit): une
+ * forme distincte suffit a reconnaitre le type au premier coup d'oeil dans
+ * une liste, a la maniere des icones d'imprimante de Bambuddy.
+ */
+const ICON_GANTRY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V6a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14"/><path d="M4 20h16"/><path d="M9 7v3"/><circle cx="9" cy="11" r="1.4" fill="currentColor" stroke="none"/><path d="M7 17h10"/></svg>';
+const ICON_ENCLOSED = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 15h16"/><circle cx="17" cy="17.2" r=".9" fill="currentColor" stroke="none"/></svg>';
+const ICON_BEDSLINGER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 20V6"/><path d="M18 20V6"/><path d="M6 6h12"/><rect x="3" y="18" width="8" height="3" rx="1"/><circle cx="12" cy="9" r="1.2" fill="currentColor" stroke="none"/></svg>';
+const ICON_GENERIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="14" width="16" height="6" rx="1"/><path d="M8 14V8h8v6"/><path d="M12 4v4"/></svg>';
+
+const MODEL_ICON_FAMILIES = [
+  [/k1\s*max/i, ICON_GANTRY],
+  [/k1c?\b/i, ICON_GANTRY],
+  [/k2/i, ICON_ENCLOSED],
+  [/ender/i, ICON_BEDSLINGER],
+];
+
+function familyIcon(model) {
+  const text = String(model || '');
+  for (const [test, svg] of MODEL_ICON_FAMILIES) {
+    if (test.test(text)) return svg;
+  }
+  return ICON_GENERIC;
+}
+
+/** Petite icone de modele, comme sur les cartes d'imprimante de Bambuddy. */
+export function printerIcon(model, { size = 32 } = {}) {
+  return el('div', {
+    class: 'printer-icon',
+    style: `width:${size}px;height:${size}px`,
+    title: model || 'Modele inconnu',
+    html: familyIcon(model),
+  });
+}
+
 /* ------------------------------------------------------- carte imprimante */
 
 /**
@@ -247,6 +284,7 @@ export function printerCard(entry, { onOpen, onRefresh, pieces = null, thumbnail
   ]);
 
   const header = el('header', {}, [
+    printerIcon(status.model),
     el('div', { style: 'min-width:0' }, [
       el('div', { class: 'name truncate', text: entry.name }),
       el('div', { class: 'sub truncate', text: status.model || '—' }),

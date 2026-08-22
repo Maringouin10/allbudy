@@ -18,7 +18,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
 from ..config import get_settings
@@ -42,6 +42,9 @@ log = logging.getLogger("allbudy.scheduler")
 #: Delai laisse a la machine pour signaler qu'elle imprime apres un lancement.
 START_GRACE_SECONDS = 90.0
 MAX_ATTEMPTS = 3
+
+#: Macro Klipper standard pour recalibrer le maillage du plateau avant impression.
+BED_MESH_MACRO = "BED_MESH_CALIBRATE"
 
 
 def _seconds_since(moment: datetime | None) -> float:
@@ -242,7 +245,11 @@ class JobScheduler:
                     await session.execute(
                         select(Job)
                         .options(selectinload(Job.file))
-                        .where(Job.status == JobStatus.QUEUED.value, Job.auto_start.is_(True))
+                        .where(
+                            Job.status == JobStatus.QUEUED.value,
+                            Job.auto_start.is_(True),
+                            or_(Job.scheduled_at.is_(None), Job.scheduled_at <= datetime.now(UTC)),
+                        )
                         .order_by(Job.priority.desc(), Job.position.asc(), Job.id.asc())
                     )
                 )
@@ -329,6 +336,7 @@ class JobScheduler:
                 )
                 return
             remote_name = file.stored_name
+            bed_leveling = job.bed_leveling
             job.status = JobStatus.SENDING.value
             job.remote_filename = remote_name
         bus.publish("job.updated", {"job_id": job_id, "status": JobStatus.SENDING.value})
@@ -341,6 +349,16 @@ class JobScheduler:
                 await self.manager.command(
                     printer_id, lambda t: t.upload(path, remote_name, start=False)
                 )
+                if bed_leveling:
+                    try:
+                        await self.manager.command(
+                            printer_id, lambda t: t.send_gcode(BED_MESH_MACRO)
+                        )
+                    except PrinterError as exc:
+                        # Une machine sans cette macro ne doit pas bloquer l'impression.
+                        log.warning(
+                            "Nivellement du plateau echoue pour le travail %s: %s", job_id, exc
+                        )
                 await self.manager.command(printer_id, lambda t: t.start_print(remote_name))
         except PrinterError as exc:
             error = str(exc)
