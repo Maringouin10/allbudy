@@ -15,7 +15,7 @@ from .. import __version__
 from ..config import get_settings
 from ..db import get_session
 from ..events import bus
-from ..models import EventLog, GcodeFile, Job, JobStatus, Printer, Spool
+from ..models import EventLog, GcodeFile, Job, JobStatus, Printer, Spool, TransportKind
 from ..printers.base import STATE_PRINTING
 from ..printers.manager import manager
 from ..queueing import scheduler
@@ -54,7 +54,9 @@ async def health() -> dict[str, Any]:
 @router.get("/stats", dependencies=[Depends(current_user)])
 async def stats(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     settings = get_settings()
-    snapshot = manager.snapshot()
+    # Le tableau de bord n'affiche que le parc reel: les imprimantes
+    # virtuelles (destinees au NAS) ne comptent pas dans ses statistiques.
+    snapshot = [s for s in manager.snapshot() if s["transport"] != TransportKind.VIRTUAL.value]
     printing = [s for s in snapshot if s["status"]["state"] == STATE_PRINTING]
 
     job_counts = dict(
@@ -86,7 +88,11 @@ async def stats(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     files_count = (await session.execute(select(func.count(GcodeFile.id)))).scalar_one()
     files_bytes = (await session.execute(select(func.sum(GcodeFile.size)))).scalar() or 0
     spools_count = (await session.execute(select(func.count(Spool.id)))).scalar_one()
-    printers_count = (await session.execute(select(func.count(Printer.id)))).scalar_one()
+    printers_count = (
+        await session.execute(
+            select(func.count(Printer.id)).where(Printer.transport != TransportKind.VIRTUAL.value)
+        )
+    ).scalar_one()
 
     usage = shutil.disk_usage(settings.data_dir)
     return {

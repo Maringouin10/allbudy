@@ -38,7 +38,9 @@ export function dashboardView(navigate) {
   }
 
   function renderPrinters() {
-    const entries = printerList().sort((a, b) => a.printer_id - b.printer_id);
+    const entries = printerList()
+      .filter((entry) => entry.transport !== 'virtual')
+      .sort((a, b) => a.printer_id - b.printer_id);
     clear(printersGrid);
     if (!entries.length) {
       printersGrid.append(emptyState(

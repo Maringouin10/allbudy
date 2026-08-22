@@ -501,8 +501,8 @@ async def test_dispatcher_suspendu(client, simulator):
 # ----------------------------------------------------------------- systeme
 async def test_stats_et_journal(client, simulator):
     stats = (await client.get("/api/system/stats")).json()
-    # +1: l'imprimante virtuelle auto-creee pour le meme modele (K1 Max).
-    assert stats["printers"]["total"] == 2
+    # Les statistiques du tableau de bord ignorent le parc virtuel (NAS).
+    assert stats["printers"]["total"] == 1
     assert "disk" in stats
 
     events = (await client.get("/api/system/events?limit=10")).json()
@@ -539,8 +539,8 @@ async def test_stats_imprimantes_libres_et_pieces(client, simulator):
     await wait_until(lambda: _connected(virtual["id"]), timeout=10)
 
     stats = (await client.get("/api/system/stats")).json()
-    # +1: l'imprimante virtuelle auto-creee (toujours "connectee") compte aussi.
-    assert stats["printers"]["free"] == 2
+    # Le tableau de bord ignore le parc virtuel (NAS): seule la reelle compte.
+    assert stats["printers"]["free"] == 1
     assert stats["jobs"]["pieces_7d"] == 0
 
     # Un plateau de 3 pieces, imprime une fois -> 3 pieces au compteur.
@@ -559,11 +559,11 @@ async def test_stats_imprimantes_libres_et_pieces(client, simulator):
     job = (await client.post("/api/jobs", json={"file_id": file["id"]})).json()
 
     # Pendant l'impression, la machine n'est plus comptee comme libre (la
-    # virtuelle, elle, reste toujours "connectee": il en reste 1). Le compte
-    # vient du cache d'etat du parc, rafraichi par la boucle d'interrogation:
-    # il peut accuser un intervalle de retard sur le statut du travail.
+    # virtuelle est ignoree des stats). Le compte vient du cache d'etat du
+    # parc, rafraichi par la boucle d'interrogation: il peut accuser un
+    # intervalle de retard sur le statut du travail.
     await wait_until(lambda: _job_status(client, job["id"], {"printing"}), timeout=15)
-    await wait_until(lambda: _free_printers(client, 1), timeout=10)
+    await wait_until(lambda: _free_printers(client, 0), timeout=10)
 
     await wait_until(lambda: _job_status(client, job["id"], {"completed"}), timeout=25)
     done = (await client.get("/api/system/stats")).json()
