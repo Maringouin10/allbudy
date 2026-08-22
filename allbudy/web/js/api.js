@@ -2,8 +2,16 @@
 
 const TOKEN_KEY = 'allbudy_token';
 
-/** Racine de l'API, deduite de la page: gere le deploiement derriere un prefixe. */
-export const BASE = document.baseURI.replace(/\/[^/]*$/, '/');
+/**
+ * Racine de l'API, deduite de la page: gere le deploiement derriere un prefixe.
+ *
+ * Calculee depuis `location.pathname` et non `document.baseURI`: ce dernier
+ * inclut le fragment `#/...` de la route courante, et le retirer avec un
+ * simple "dernier segment" corrompt l'URL des qu'on recharge la page sur une
+ * route (ex: `#/printers`) plutot que sur la racine - tous les appels API
+ * partent alors vers `/` au lieu de `/api/...` et recoivent du HTML.
+ */
+export const BASE = location.origin + location.pathname.replace(/[^/]*$/, '');
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY) || '';
@@ -54,7 +62,15 @@ async function request(method, path, { body, raw, headers = {} } = {}) {
   if (raw) return response;
   if (response.status === 204) return null;
   const type = response.headers.get('content-type') || '';
-  return type.includes('application/json') ? response.json() : response.text();
+  if (type.includes('application/json')) return response.json();
+  const text = await response.text();
+  if (text.trimStart().startsWith('<')) {
+    // Signe qu'on a recu la page HTML de l'appli a la place de JSON (BASE mal
+    // calcule, reverse proxy mal configure...): echouer clairement plutot que
+    // de renvoyer une chaine que l'appelant traiterait a tort comme des donnees.
+    throw new ApiError('Reponse inattendue du serveur (HTML recu a la place de JSON)', response.status);
+  }
+  return text;
 }
 
 export const api = {
