@@ -176,6 +176,44 @@ def test_moonraker_chambre_et_ventilateurs_detectes():
     assert len(status.spools) == 1
 
 
+def test_moonraker_cfs_instance_nommee(caplog):
+    """Une instance Klipper nommee ('cfs cfs0') doit matcher via le type seul."""
+    transport = MoonrakerTransport(config())
+    transport._available = ["extruder", "cfs cfs0"]
+    with caplog.at_level("INFO"):
+        transport._detect_objects()
+    assert transport._cfs_key == "cfs cfs0"
+    assert transport.config.has_cfs is True
+    assert any("CFS detecte via l'objet 'cfs cfs0'" in message for message in caplog.messages)
+
+
+def test_moonraker_cfs_non_detecte_journalise(caplog):
+    """Sans objet correspondant, le journal liste tous les objets exposes."""
+    transport = MoonrakerTransport(config())
+    transport._available = ["extruder", "heater_bed"]
+    with caplog.at_level("INFO"):
+        transport._detect_objects()
+    assert transport._cfs_key is None
+    assert any("NON detecte" in message for message in caplog.messages)
+    assert any("extruder" in message and "heater_bed" in message for message in caplog.messages)
+
+
+def test_moonraker_cfs_objet_trouve_mais_illisible_journalise_le_brut(caplog):
+    """Objet detecte mais structure non reconnue: le contenu brut est journalise."""
+    transport = MoonrakerTransport(config())
+    transport._available = ["cfs"]
+    transport._detect_objects()
+    assert transport._cfs_key == "cfs"
+    transport._objects = {"cfs": {"unexpected_shape": True}}
+    with caplog.at_level("INFO"):
+        spools = transport._parse_cfs()
+    assert spools == []
+    assert any(
+        "aucun emplacement reconnu" in message and "unexpected_shape" in message
+        for message in caplog.messages
+    )
+
+
 def test_moonraker_detection_chambre_par_heuristique():
     transport = MoonrakerTransport(config())
     transport._available = ["temperature_sensor Chamber_XYZ"]
@@ -278,6 +316,26 @@ def test_lan_cfs_encapsule_en_json():
     )
     spools = transport._parse_spools()
     assert len(spools) == 1 and spools[0].material == "PLA"
+
+
+def test_lan_champ_present_mais_illisible_journalise_le_brut(caplog):
+    """Un champ evoquant le CFS mais de structure inconnue: log du contenu brut."""
+    transport = lan_with_payload({"cfsInfo": {"unexpected_shape": True}})
+    with caplog.at_level("INFO"):
+        spools = transport._parse_spools()
+    assert spools == []
+    assert any(
+        "aucun emplacement reconnu" in message and "unexpected_shape" in message
+        for message in caplog.messages
+    )
+
+
+def test_lan_cfs_non_detecte_journalise_les_champs(caplog):
+    transport = lan_with_payload({"nozzleTemp": "210"})
+    with caplog.at_level("INFO"):
+        spools = transport._parse_spools()
+    assert spools == []
+    assert any("nozzleTemp" in message for message in caplog.messages)
 
 
 # ------------------------------------------------------------- simulateur

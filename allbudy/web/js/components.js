@@ -43,6 +43,39 @@ export function cfsPanel(spools = [], { compact = false } = {}) {
   return el('div', { class: `cfs-panel${compact ? ' compact' : ''}` }, slots);
 }
 
+/**
+ * Bloc CFS complet: emplacements s'il y en a, sinon un etat explicite plutot
+ * que de disparaitre silencieusement. `capabilities` vient de la charge
+ * utile temps reel (`entry.capabilities`) et reflete la detection en direct,
+ * independamment de ce qui est enregistre en base.
+ */
+export function cfsSection(spools = [], capabilities = {}, { connected = true } = {}) {
+  const panel = cfsPanel(spools);
+  if (panel) {
+    return el('div', { class: 'card-section' }, [
+      el('div', { class: 'section-title' }, [
+        'CFS',
+        el('span', { class: 'small muted', text: ` ${spools.length} emplacement(s)` }),
+      ]),
+      panel,
+    ]);
+  }
+
+  // Hors ligne, l'absence de CFS n'est pas confirmee: on ne l'affirme pas.
+  let message = 'Aucun CFS detecte sur cette imprimante.';
+  let warn = false;
+  if (!connected) {
+    message = 'Imprimante hors ligne : etat du CFS inconnu.';
+  } else if (capabilities && capabilities.cfs) {
+    message = 'Objet CFS detecte sur la machine mais aucun emplacement reconnu. Voir les journaux du serveur (docker compose logs).';
+    warn = true;
+  }
+  return el('div', { class: 'card-section' }, [
+    el('div', { class: 'section-title', text: 'CFS' }),
+    el('div', { class: `cfs-empty${warn ? ' warn' : ''}`, text: message }),
+  ]);
+}
+
 /** Ancienne representation compacte, encore utilisee dans les listes denses. */
 export function slotChips(spools = []) {
   if (!spools.length) return null;
@@ -245,16 +278,7 @@ export function printerCard(entry, { onOpen, onRefresh, pieces = null, thumbnail
     ]));
   }
 
-  const cfs = cfsPanel(status.spools);
-  if (cfs) {
-    body.push(el('div', { class: 'card-section' }, [
-      el('div', { class: 'section-title' }, [
-        'CFS',
-        el('span', { class: 'small muted', text: ` ${status.spools.length} emplacements` }),
-      ]),
-      cfs,
-    ]));
-  }
+  body.push(cfsSection(status.spools, entry.capabilities, { connected }));
 
   body.push(el('div', { class: 'row card-actions' }, [
     el('button', { class: 'sm', text: 'Details', onClick: () => onOpen && onOpen(entry.printer_id) }),

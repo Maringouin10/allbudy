@@ -297,6 +297,11 @@ label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: .2
   position: absolute; top: 3px; right: 3px; width: 6px; height: 6px;
   border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent);
 }
+.cfs-empty {
+  font-size: .8rem; color: var(--muted); background: var(--bg);
+  border: 1px dashed var(--line); border-radius: var(--radius-sm); padding: .5rem .6rem;
+}
+.cfs-empty.warn { color: var(--warn); border-color: rgba(241,196,15,.35); }
 .cfs-label { text-align: center; width: 100%; }
 .cfs-mat { font-size: .68rem; font-weight: 640; line-height: 1.2; }
 .cfs-pct { font-size: .65rem; color: var(--muted); font-variant-numeric: tabular-nums; }

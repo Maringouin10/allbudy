@@ -318,8 +318,11 @@ class CrealityLanTransport(PrinterTransport):
             if key not in candidates
             and any(word in key.lower() for word in ("cfs", "materialbox", "boxinfo"))
         ]
+        unparsed: tuple[str, Any] | None = None
         for key in candidates:
             payload = self._payload.get(key)
+            if payload in (None, "", {}):
+                continue
             if isinstance(payload, str):
                 try:
                     payload = json.loads(payload)
@@ -331,12 +334,25 @@ class CrealityLanTransport(PrinterTransport):
                     log.info("%s: CFS detecte via le champ '%s'", self.config.name, key)
                     self._cfs_logged = True
                 return spools
+            if unparsed is None:
+                unparsed = (key, payload)
         if not self._cfs_logged:
-            log.info(
-                "%s: aucun CFS detecte dans les champs recus (%s)",
-                self.config.name,
-                ", ".join(sorted(self._payload)) or "aucun",
-            )
+            if unparsed:
+                # Un champ evoquant le CFS est present mais sa structure n'est
+                # reconnue par aucun format gere: son contenu brut est
+                # indispensable pour l'ajouter a parse_cfs_payload.
+                log.info(
+                    "%s: champ '%s' present mais aucun emplacement reconnu. Contenu brut: %s",
+                    self.config.name,
+                    unparsed[0],
+                    unparsed[1],
+                )
+            else:
+                log.info(
+                    "%s: aucun CFS detecte dans les champs recus (%s)",
+                    self.config.name,
+                    ", ".join(sorted(self._payload)) or "aucun",
+                )
             self._cfs_logged = True
         return []
 

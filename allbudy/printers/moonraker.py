@@ -106,6 +106,7 @@ class MoonrakerTransport(PrinterTransport):
         self._chamber_fan_key: str | None = None
         self._light_key: str | None = None
         self._cfs_key: str | None = None
+        self._cfs_payload_logged = False
         self._extra_fans: list[str] = []
         self._client: httpx.AsyncClient | None = None
         self._ws_ok = False
@@ -210,6 +211,21 @@ class MoonrakerTransport(PrinterTransport):
             self._available = []
         self._detect_objects()
 
+        # Diagnostic best-effort: si le CFS n'est pas un objet Klipper mais un
+        # plugin propre a Moonraker, il apparaitra ici plutot que dans
+        # /printer/objects/list. Non bloquant sur les Moonraker plus anciens
+        # qui n'exposent pas cette route.
+        try:
+            server_info = await self._request("GET", "/server/info")
+            components = sorted((server_info.get("result") or {}).get("components", []))
+            log.info(
+                "%s: composants Moonraker enregistres: %s",
+                self.config.name,
+                ", ".join(components) or "aucun",
+            )
+        except PrinterError as exc:
+            log.debug("%s: /server/info indisponible (%s)", self.config.name, exc)
+
         try:
             self._ws = await asyncio.wait_for(
                 websockets.connect(
@@ -258,13 +274,24 @@ class MoonrakerTransport(PrinterTransport):
         self._cfs_key = pick(_CFS_HINTS) or self._find_cfs_key()
         if self._cfs_key:
             self.config.has_cfs = True
-            log.info("%s: CFS detecte via l'objet '%s'", self.config.name, self._cfs_key)
-        elif self._available:
-            log.info(
-                "%s: aucun CFS detecte parmi les objets Klipper exposes (%s)",
-                self.config.name,
-                ", ".join(sorted(self._available)),
-            )
+
+        # Journalise systematiquement (pas seulement en cas d'echec): le nom
+        # detecte peut correspondre au mauvais objet, ou l'objet peut exister
+        # sans que son contenu soit reconnu par parse_cfs_payload - dans les
+        # deux cas, la liste complete est necessaire pour diagnostiquer.
+        log.info(
+            "%s: %d objet(s) Klipper expose(s): %s",
+            self.config.name,
+            len(self._available),
+            ", ".join(sorted(self._available)) or "aucun",
+        )
+        log.info(
+            "%s: CFS %s",
+            self.config.name,
+            f"detecte via l'objet '{self._cfs_key}'"
+            if self._cfs_key
+            else "NON detecte (aucun objet Klipper ne correspond)",
+        )
 
         # Tout ventilateur restant est remonte en lecture seule: le ventilateur
         # de tete par exemple est asservi au firmware, on l'affiche sans le piloter.
@@ -457,7 +484,28 @@ class MoonrakerTransport(PrinterTransport):
         """Lit l'objet CFS Creality expose par Moonraker."""
         if not self._cfs_key:
             return []
-        return parse_cfs_payload(self._objects.get(self._cfs_key))
+        payload = self._objects.get(self._cfs_key)
+        spools = parse_cfs_payload(payload)
+        if not spools and not self._cfs_payload_logged:
+            # L'objet existe mais sa structure n'est reconnue par aucun des
+            # formats geres: le contenu brut est indispensable pour ajouter
+            # le bon format a parse_cfs_payload.
+            log.info(
+                "%s: objet CFS '%s' trouve mais aucun emplacement reconnu. Contenu brut: %s",
+                self.config.name,
+                self._cfs_key,
+                payload,
+            )
+            self._cfs_payload_logged = True
+        elif spools and not self._cfs_payload_logged:
+            log.info(
+                "%s: CFS '%s' analyse avec succes: %d emplacement(s)",
+                self.config.name,
+                self._cfs_key,
+                len(spools),
+            )
+            self._cfs_payload_logged = True
+        return spools
 
     # ------------------------------------------------------------- commandes
     async def _post(self, path: str, **kwargs: Any) -> Any:

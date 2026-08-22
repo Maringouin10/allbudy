@@ -1,6 +1,6 @@
 /** Pilotage detaille d'une imprimante. */
 import { api, apiUrl } from '../api.js';
-import { cfsPanel, fanPanel } from '../components.js';
+import { cfsSection, fanPanel } from '../components.js';
 import { on, printerState } from '../store.js';
 import {
   badge, clear, confirmDialog, el, field, formatBytes, formatDuration, formatTemp, modal, run,
@@ -207,14 +207,18 @@ export function printerDetailView(printerId, navigate) {
   function renderCfs() {
     const live = printerState(id);
     const spools = (live && live.status && live.status.spools) || [];
-    clear(cfsCard).append(el('h3', { text: 'Filaments (CFS)' }));
+    const capabilities = (live && live.capabilities) || {};
+    const connected = !!(live && live.connected);
+    clear(cfsCard).append(
+      el('h3', { text: 'Filaments (CFS)' }),
+      cfsSection(spools, capabilities, { connected }),
+    );
     if (!spools.length) {
-      cfsCard.append(el('p', { class: 'small muted', text: 'Aucun CFS detecte. Declarez les bobines montees depuis l\'ecran Filaments pour que la file d\'attente sache quoi envoyer ici.' }));
+      cfsCard.append(el('p', { class: 'small muted', style: 'margin-top:.5rem', text: 'Declarez les bobines montees depuis l\'ecran Filaments pour que la file d\'attente sache quoi envoyer ici, meme sans CFS detecte automatiquement.' }));
       cfsCard.append(el('button', { class: 'sm', text: 'Ouvrir Filaments', onClick: () => navigate('spools') }));
-      return;
+    } else {
+      cfsCard.append(el('div', { class: 'small muted', style: 'margin-top:.5rem', text: 'Etat lu directement sur la machine et synchronise avec l\'inventaire.' }));
     }
-    cfsCard.append(cfsPanel(spools));
-    cfsCard.append(el('div', { class: 'small muted', style: 'margin-top:.5rem', text: 'Etat lu directement sur la machine et synchronise avec l\'inventaire.' }));
   }
 
   async function renderFiles() {
