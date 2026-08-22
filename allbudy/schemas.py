@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .models import JobStatus, StorageKind, TransportKind
+from .models import JobStatus, StorageKind, TransportKind, WebhookEvent
 
 HexColor = str
 
@@ -289,6 +289,40 @@ class StorageOut(StorageBase):
     last_sync: datetime | None = None
     last_error: str | None = None
     has_password: bool = False
+
+
+class WebhookBase(BaseModel):
+    name: str = ""
+    event: WebhookEvent = WebhookEvent.PRINT_FINISHED
+    url: str = Field(min_length=1, max_length=1024)
+    printer_id: int | None = None
+    """Limite le webhook a une seule imprimante. Vide + tag vide = toutes."""
+    tag: str | None = None
+    """Limite le webhook aux imprimantes portant cette etiquette (groupe)."""
+    bed_cold_threshold: float = Field(default=40.0, ge=0, le=120)
+    enabled: bool = True
+
+
+class WebhookCreate(WebhookBase):
+    pass
+
+
+class WebhookUpdate(BaseModel):
+    name: str | None = None
+    event: WebhookEvent | None = None
+    url: str | None = Field(default=None, min_length=1, max_length=1024)
+    printer_id: int | None = None
+    tag: str | None = None
+    bed_cold_threshold: float | None = Field(default=None, ge=0, le=120)
+    enabled: bool | None = None
+
+
+class WebhookOut(WebhookBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    last_fired_at: datetime | None = None
+    last_error: str | None = None
 
 
 # ----------------------------------------------------------------- commandes

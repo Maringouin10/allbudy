@@ -248,14 +248,44 @@ function familyIcon(model) {
   return ICON_GENERIC;
 }
 
+//: Vraies photos produit pour les familles les plus courantes du parc; les
+//: autres modeles restent sur la silhouette generique ci-dessus.
+const MODEL_PHOTOS = [
+  [/k2/i, 'https://cdn.shopify.com/s/files/1/0911/3233/0284/files/imgi_1_K2Combo-_4.png?v=1769932494'],
+  [/ender-?\s*3\s*v3/i, 'https://cdn.tanguay.ca/images/products/1920px/0856639.jpg'],
+];
+
+function photoFor(model) {
+  const text = String(model || '');
+  for (const [test, url] of MODEL_PHOTOS) {
+    if (test.test(text)) return url;
+  }
+  return null;
+}
+
 /** Petite icone de modele, comme sur les cartes d'imprimante de Bambuddy. */
 export function printerIcon(model, { size = 32 } = {}) {
-  return el('div', {
-    class: 'printer-icon',
+  const photo = photoFor(model);
+  const wrap = el('div', {
+    class: `printer-icon${photo ? ' photo' : ''}`,
     style: `width:${size}px;height:${size}px`,
     title: model || 'Modele inconnu',
-    html: familyIcon(model),
+    html: photo ? null : familyIcon(model),
   });
+  if (photo) {
+    wrap.append(el('img', {
+      src: photo,
+      alt: '',
+      loading: 'lazy',
+      // L'image est hebergee ailleurs: si elle devient inaccessible, on
+      // retombe sur la silhouette generique plutot que sur un cadre vide.
+      onerror: () => {
+        wrap.classList.remove('photo');
+        wrap.innerHTML = ICON_GENERIC;
+      },
+    }));
+  }
+  return wrap;
 }
 
 /* ------------------------------------------------------- carte imprimante */

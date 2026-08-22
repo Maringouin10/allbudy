@@ -11,7 +11,8 @@ from sqlalchemy import select
 from ..config import get_settings
 from ..db import session_scope
 from ..events import bus, record_event
-from ..models import Printer, Spool, TransportKind
+from ..models import Printer, Spool, TransportKind, Webhook, WebhookEvent
+from ..webhooks import bed_cold_payload, fire, matching_webhooks
 from .base import (
     STATE_OFFLINE,
     PrinterConfig,
@@ -73,6 +74,10 @@ class PrinterRuntime:
         self.task: asyncio.Task[None] | None = None
         self._cfs_fingerprint: str | None = None
         self._lock = asyncio.Lock()
+        self.bed_cold_armed = False
+        """Un travail vient de se terminer: on guette le refroidissement du plateau."""
+        self.bed_cold_notified: set[int] = set()
+        """Ids des webhooks bed_cold deja notifies depuis le dernier armement."""
 
     @property
     def capabilities(self) -> dict[str, bool]:
@@ -184,6 +189,7 @@ class PrinterManager:
                 runtime.status = status
                 runtime.connected = True
                 await self._sync_cfs(runtime, status.spools)
+                await self._check_bed_cold(runtime, status)
                 bus.publish("printer.status", runtime.to_dict())
                 await asyncio.sleep(settings.poll_interval)
 
@@ -256,6 +262,41 @@ class PrinterManager:
                     row.remaining_g = round(row.total_g * state.remaining_pct / 100.0, 1)
         bus.publish("spools.updated", {"printer_id": runtime.id})
 
+    async def _check_bed_cold(self, runtime: PrinterRuntime, status: PrinterStatus) -> None:
+        """Notifie les webhooks `bed_cold` des lors que le plateau est descendu
+        sous leur seuil, une fois par webhook depuis le dernier armement
+        (voir `arm_bed_cold`, appele a la fin d'un travail)."""
+        if not runtime.bed_cold_armed or status.bed_temp <= 0:
+            # bed_temp <= 0 = pas encore une vraie lecture (juste apres armement).
+            return
+        async with session_scope() as session:
+            printer = await session.get(Printer, runtime.id)
+            if printer is None:
+                runtime.bed_cold_armed = False
+                return
+            webhooks = await matching_webhooks(session, WebhookEvent.BED_COLD, printer)
+
+        pending = [w for w in webhooks if w.id not in runtime.bed_cold_notified]
+        if not pending:
+            runtime.bed_cold_armed = False
+            return
+        for webhook in pending:
+            if status.bed_temp > webhook.bed_cold_threshold:
+                continue
+            runtime.bed_cold_notified.add(webhook.id)
+            # Tache independante: l'appel HTTP ne doit pas retenir de transaction.
+            asyncio.create_task(self._fire_bed_cold(webhook.id, runtime.id, status.bed_temp))
+        if len(runtime.bed_cold_notified) >= len(webhooks):
+            runtime.bed_cold_armed = False
+
+    async def _fire_bed_cold(self, webhook_id: int, printer_id: int, bed_temp: float) -> None:
+        async with session_scope() as session:
+            webhook = await session.get(Webhook, webhook_id)
+            printer = await session.get(Printer, printer_id)
+            if webhook is None or printer is None:
+                return
+            await fire(session, webhook, bed_cold_payload(printer, bed_temp))
+
     # ----------------------------------------------------------------- acces
     def get(self, printer_id: int) -> PrinterRuntime | None:
         return self._runtimes.get(printer_id)
@@ -276,6 +317,16 @@ class PrinterManager:
     def is_free(self, printer_id: int) -> bool:
         runtime = self._runtimes.get(printer_id)
         return bool(runtime and runtime.connected and runtime.status.is_free)
+
+    def arm_bed_cold(self, printer_id: int) -> None:
+        """A appeler quand un travail vient de se terminer sur cette machine:
+        le prochain cycle de poll commence a guetter le refroidissement du
+        plateau pour les webhooks `bed_cold` (voir `_check_bed_cold`)."""
+        runtime = self._runtimes.get(printer_id)
+        if runtime is None:
+            return
+        runtime.bed_cold_armed = True
+        runtime.bed_cold_notified = set()
 
     async def command(
         self, printer_id: int, action: Callable[[PrinterTransport], Awaitable[T]]

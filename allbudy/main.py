@@ -14,7 +14,7 @@ from sqlalchemy import select
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
-from .api import auth, files, jobs, printers, spools, storage, system, ws
+from .api import auth, files, jobs, printers, spools, storage, system, webhooks, ws
 from .config import get_settings
 from .db import dispose_db, init_db, session_scope
 from .events import record_event
@@ -175,7 +175,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(NoCacheStaticMiddleware)
 
-    for module in (auth, system, printers, files, jobs, spools, storage):
+    for module in (auth, system, printers, files, jobs, spools, storage, webhooks):
         app.include_router(module.router)
     app.include_router(ws.router)
 

@@ -253,6 +253,42 @@ class EventLog(Base):
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
+class WebhookEvent(str, enum.Enum):
+    """Evenement declenchant l'appel d'un webhook."""
+
+    PRINT_FINISHED = "print_finished"
+    """Un travail vient de se terminer avec succes."""
+    BED_COLD = "bed_cold"
+    """Le plateau est redescendu sous le seuil configure apres une impression."""
+
+
+class Webhook(Base):
+    """Notification HTTP sortante sur un evenement d'impression.
+
+    La portee est soit toutes les imprimantes (printer_id et tag absents),
+    soit un groupe (tag, reutilisant les etiquettes deja posees sur les
+    imprimantes pour le matching de la file), soit une machine precise
+    (printer_id).
+    """
+
+    __tablename__ = "webhooks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    event: Mapped[str] = mapped_column(String(32), default=WebhookEvent.PRINT_FINISHED.value)
+    url: Mapped[str] = mapped_column(String(1024))
+    printer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("printers.id", ondelete="CASCADE"), nullable=True
+    )
+    tag: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    bed_cold_threshold: Mapped[float] = mapped_column(Float, default=40.0)
+    """Temperature (°C) sous laquelle le plateau est considere froid (evenement bed_cold)."""
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Setting(Base):
     """Reglages runtime modifiables depuis l'UI."""
 

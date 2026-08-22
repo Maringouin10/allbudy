@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { clear, el, formatBytes, formatDuration, toastError } from '../ui.js';
 import { eventsSettingsSection } from './events.js';
 import { storageSettingsSection } from './storage.js';
+import { webhooksSettingsSection } from './webhooks.js';
 
 function section(title, content) {
   return el('div', { class: 'card' }, [
@@ -33,6 +34,7 @@ export function settingsView() {
       el('a', { class: 'btn', href: '#/kiosk', target: '_blank', text: '📱 Ouvrir le mode kiosque' }),
     ]),
     section('Depots distants', storageSettingsSection()),
+    section('Webhooks', webhooksSettingsSection()),
     section('Journal', eventsSection),
   ]);
 

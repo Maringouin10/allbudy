@@ -467,3 +467,61 @@ async def test_ventilateurs_exposes_dans_letat(client, simulator):
 async def _free_printers(client, expected: int):
     stats = (await client.get("/api/system/stats")).json()
     return stats["printers"]["free"] == expected
+
+
+async def test_crud_webhook(client):
+    printer = (
+        await client.post(
+            "/api/printers",
+            json={"name": "k2", "transport": "simulator", "host": "sim", "port": 0},
+        )
+    ).json()
+
+    created = await client.post(
+        "/api/webhooks",
+        json={
+            "name": "Discord",
+            "event": "print_finished",
+            "url": "https://example.invalid/hook",
+            "printer_id": printer["id"],
+        },
+    )
+    assert created.status_code == 201
+    webhook = created.json()
+    assert webhook["event"] == "print_finished"
+    assert webhook["printer_id"] == printer["id"]
+
+    listed = await client.get("/api/webhooks")
+    assert [w["id"] for w in listed.json()] == [webhook["id"]]
+
+    patched = await client.patch(
+        f"/api/webhooks/{webhook['id']}",
+        json={"event": "bed_cold", "bed_cold_threshold": 35},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["event"] == "bed_cold"
+    assert patched.json()["bed_cold_threshold"] == 35
+
+    deleted = await client.delete(f"/api/webhooks/{webhook['id']}")
+    assert deleted.status_code == 200
+    assert (await client.get("/api/webhooks")).json() == []
+
+
+async def test_webhook_refuse_imprimante_et_etiquette_ensemble(client):
+    printer = (
+        await client.post(
+            "/api/printers",
+            json={"name": "k2b", "transport": "simulator", "host": "sim", "port": 0},
+        )
+    ).json()
+
+    response = await client.post(
+        "/api/webhooks",
+        json={
+            "event": "print_finished",
+            "url": "https://example.invalid/hook",
+            "printer_id": printer["id"],
+            "tag": "atelier",
+        },
+    )
+    assert response.status_code == 400

@@ -359,9 +359,16 @@ function colorSlotField(index, total, meta, inventory, spoolById) {
   const fileMaterial = (meta.filament_types || [])[index] || '';
   const fileColor = (meta.filament_colors || [])[index] || null;
 
+  // Pastille de previsualisation: on choisit une bobine par sa couleur, pas
+  // par son code hexadecimal — inutile de savoir lire un #RRGGBB.
+  const dot = el('span', {
+    style: `display:inline-block;width:22px;height:22px;border-radius:6px;flex:none;background:${fileColor || '#7f8c8d'};border:1px solid rgba(255,255,255,.3)`,
+  });
+
   const select = el('select', {}, [
     el('option', {
       value: 'auto',
+      style: fileColor ? `background:${fileColor}` : null,
       text: `Auto — ${fileMaterial || 'matiere du fichier'}${fileColor ? ' (couleur du fichier)' : ''}`,
     }),
     el('option', { value: 'manual', text: 'Saisie manuelle...' }),
@@ -375,6 +382,7 @@ function colorSlotField(index, total, meta, inventory, spoolById) {
       spoolById.set(key, { material: spool.material, color: spool.color_hex });
       optgroup.append(el('option', {
         value: key,
+        style: `background:${spool.color_hex}`,
         text: `${spool.material} · ${spool.color_name || spool.color_hex}${spool.vendor ? ` · ${spool.vendor}` : ''}`,
       }));
     }
@@ -387,13 +395,18 @@ function colorSlotField(index, total, meta, inventory, spoolById) {
     el('div', { style: 'flex:1' }, [manualMaterial]),
     manualColor,
   ]);
+
+  const updatePreview = () => {
+    if (select.value === 'auto') dot.style.background = fileColor || '#7f8c8d';
+    else if (select.value === 'manual') dot.style.background = manualColor.value;
+    else dot.style.background = (spoolById.get(select.value) || {}).color || '#7f8c8d';
+  };
   select.addEventListener('change', () => {
     manualRow.style.display = select.value === 'manual' ? 'flex' : 'none';
+    updatePreview();
   });
+  manualColor.addEventListener('input', updatePreview);
 
-  const dot = el('span', {
-    style: `width:13px;height:13px;border-radius:50%;flex:none;background:${fileColor || '#7f8c8d'};border:1px solid rgba(255,255,255,.25)`,
-  });
   const node = el('div', {}, [
     el('div', { class: 'row', style: 'gap:.5rem;flex-wrap:nowrap' }, [
       dot,
@@ -451,7 +464,6 @@ export function printModal(file, onDone) {
   // Les champs sont gardes dans la fermeture: les relire par position dans le
   // DOM casserait au moindre changement de mise en page.
   const copies = el('input', { type: 'number', min: 1, value: 1 });
-  const tolerance = el('input', { type: 'range', min: 0, max: 160, value: 40 });
   const nozzle = el('input', { type: 'number', step: '0.05', value: meta.nozzle_diameter || '' });
   const tags = el('input', { placeholder: 'chambre-chauffee, grande-plaque' });
   const filamentsBox = el('div', { class: 'col' }, [el('p', { class: 'small muted', text: 'Chargement des bobines...' })]);
@@ -473,20 +485,35 @@ export function printModal(file, onDone) {
   const scheduleInput = el('input', { type: 'datetime-local' });
   const scheduleRow = el('div', { style: 'margin-top:.5rem;display:none' }, [field('Date et heure', scheduleInput)]);
 
+  /** Normalise pour comparer « K2 Plus » et « k2-plus » sans faux negatif. */
+  const normalizeModel = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  /** Le fichier lui-meme indique parfois son imprimante cible (metadonnees du trancheur). */
+  function fileModelHint() {
+    const raw = (meta.printer_model || '').trim();
+    if (!raw) return null;
+    const norm = normalizeModel(raw);
+    const match = printers.find((p) => {
+      const pm = normalizeModel(p.model);
+      return pm && (pm === norm || pm.includes(norm) || norm.includes(pm));
+    });
+    return match ? match.model : null;
+  }
+
   function primaryModel() {
     if (selectedPrinterId) {
       const chosen = printers.find((p) => p.id === selectedPrinterId);
       if (chosen) return chosen.model;
     }
-    const online = printers.filter((p) => { const live = printerState(p.id); return live && live.connected; });
-    const pool = online.length ? online : printers;
-    const counts = new Map();
-    for (const p of pool) counts.set(p.model, (counts.get(p.model) || 0) + 1);
-    let best = null;
-    for (const [model, count] of counts) {
-      if (!best || count > best[1]) best = [model, count];
-    }
-    return best ? best[0] : null;
+    const hinted = fileModelHint();
+    if (hinted) return hinted;
+    // Un seul modele dans le parc: aucune ambiguite a lever.
+    const distinctModels = new Set(printers.map((p) => p.model));
+    if (distinctModels.size === 1) return printers[0].model;
+    // Plusieurs modeles et aucun indice fiable: deviner serait souvent faux
+    // (ex: proposer une Ender-3 V3 pour un fichier tranche pour une K2) —
+    // mieux vaut laisser l'utilisateur choisir explicitement.
+    return null;
   }
 
   function renderTargeting() {
@@ -504,7 +531,9 @@ export function printModal(file, onDone) {
       }),
     );
 
-    const group = showAllModels ? printers : printers.filter((p) => p.model === model);
+    // Sans modele fiable (fichier ambigu, parc heterogene), on montre tout
+    // plutot que de filtrer sur une devinette potentiellement fausse.
+    const group = showAllModels || !model ? printers : printers.filter((p) => p.model === model);
     const hidden = printers.length - group.length;
 
     clear(printerBox);
@@ -550,7 +579,11 @@ export function printModal(file, onDone) {
     render: async (body) => {
       body.append(
         sectionBlock('Travail', el('div', { class: 'truncate', text: file.filename })),
-        sectionBlock('Imprimante', targetToggle, printerBox),
+        sectionBlock('Imprimante',
+          meta.printer_model
+            ? el('p', { class: 'small muted', style: 'margin:0 0 .5rem', text: `Fichier tranche pour : ${meta.printer_model}` })
+            : null,
+          targetToggle, printerBox),
         sectionBlock('Bobines exigees',
           el('p', { class: 'small muted', style: 'margin:0 0 .5rem', text: 'Choisissez une bobine deja chargee par le passe pour fixer sa couleur au lieu de deviner, ou laissez « Auto » pour vous fier au fichier.' }),
           filamentsBox),
@@ -564,9 +597,6 @@ export function printModal(file, onDone) {
         ]),
         sectionBlock('Quand imprimer', whenToggle, scheduleRow),
         sectionBlock('Autres criteres',
-          el('div', { class: 'row', style: 'margin-bottom:.5rem' }, [
-            el('div', { style: 'flex:1' }, [el('label', { class: 'small muted', text: 'Tolerance de teinte' }), tolerance]),
-          ]),
           el('div', { class: 'field-row' }, [
             field('Buse exigee (mm)', nozzle),
             field('Etiquettes exigees', tags),
@@ -579,9 +609,14 @@ export function printModal(file, onDone) {
       try {
         printers = await api.printers();
         const model = primaryModel();
-        const initial = printers.filter((p) => p.model === model)
-          .find((p) => { const live = printerState(p.id); return live && live.connected && live.status.is_free; });
-        selectedPrinterId = (initial || printers.find((p) => p.model === model) || printers[0] || {}).id || null;
+        if (model) {
+          const candidates = printers.filter((p) => p.model === model);
+          const free = candidates.find((p) => { const live = printerState(p.id); return live && live.connected && live.status.is_free; });
+          selectedPrinterId = (free || candidates[0] || {}).id || null;
+        } else {
+          // Modele ambigu: pas de devinette, l'utilisateur choisit lui-meme.
+          selectedPrinterId = null;
+        }
       } catch (error) {
         toastError(error);
       }
@@ -637,7 +672,6 @@ export function printModal(file, onDone) {
         scheduled_at: scheduledAt,
         bed_leveling: bedLeveling,
         required_filaments: overrides.some(Boolean) ? overrides : [],
-        color_tolerance: Number(tolerance.value),
         required_nozzle: nozzle.value ? Number(nozzle.value) : null,
         required_tags: tags.value.split(',').map((t) => t.trim()).filter(Boolean),
         printer_id: printerId,

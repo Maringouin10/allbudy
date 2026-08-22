@@ -35,6 +35,7 @@ from ..printers.base import (
     PrinterError,
 )
 from ..printers.manager import PrinterManager
+from ..webhooks import notify_print_finished
 from .matcher import evaluate
 
 log = logging.getLogger("allbudy.scheduler")
@@ -206,6 +207,14 @@ class JobScheduler:
                     job_id=job.id,
                     session=session,
                 )
+                if printer_id is not None:
+                    # Le plateau est encore chaud: on ne guette sa temperature
+                    # qu'a partir de maintenant (voir PrinterManager._check_bed_cold).
+                    self.manager.arm_bed_cold(printer_id)
+                    # Tache independante: l'appel HTTP d'un webhook ne doit pas
+                    # retenir la transaction en cours (voir _send_job plus bas
+                    # pour le meme principe applique a l'envoi du fichier).
+                    asyncio.create_task(self._notify_print_finished(printer_id, job.id))
         else:
             job.attempts += 1
             job.error = error
@@ -236,6 +245,15 @@ class JobScheduler:
                     session=session,
                 )
         bus.publish("job.updated", {"job_id": job.id, "status": job.status})
+
+    async def _notify_print_finished(self, printer_id: int, job_id: int) -> None:
+        """Tache independante: sa propre transaction, hors du chemin critique."""
+        async with session_scope() as session:
+            printer = await session.get(Printer, printer_id)
+            job = await session.get(Job, job_id)
+            if printer is None or job is None:
+                return
+            await notify_print_finished(session, printer, job)
 
     # -------------------------------------------------------------- dispatch
     async def dispatch(self) -> None:
