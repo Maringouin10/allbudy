@@ -298,6 +298,37 @@ async def test_plateau_non_vide_bloque_le_travail_suivant(client, simulator):
     await wait_until(lambda: _job_status(client, second["id"], {"printing", "sending", "completed"}), timeout=15)
 
 
+async def test_echec_final_bloque_aussi_le_travail_suivant(client, simulator, monkeypatch):
+    """Un travail en echec definitif laisse peut-etre une piece ratee sur le
+    plateau: comme pour une reussite, il faut confirmer avant de renvoyer."""
+    import sys
+
+    from allbudy.printers.manager import manager
+
+    # Le paquet "queueing" reexpose son attribut "scheduler" comme l'instance
+    # du dispatcher (voir queueing/__init__.py): on prend le vrai module via
+    # sys.modules pour patcher sa constante.
+    scheduler_module = sys.modules["allbudy.queueing.scheduler"]
+
+    # Une seule tentative autorisee: le premier echec est donc definitif.
+    monkeypatch.setattr(scheduler_module, "MAX_ATTEMPTS", 1)
+
+    file = await upload_gcode(client, "cube.gcode", material="PLA", color="#E74C3C")
+    await wait_until(lambda: _inventory_ready(client, simulator["id"]), timeout=10)
+
+    runtime = manager.get(simulator["id"])
+    runtime.transport.set_print_duration(10)
+
+    job = (await client.post("/api/jobs", json={"file_id": file["id"]})).json()
+    await wait_until(lambda: _job_status(client, job["id"], {"printing", "sending"}), timeout=15)
+
+    await client.post(f"/api/printers/{simulator['id']}/emergency-stop")
+    await wait_until(lambda: _job_status(client, job["id"], {"failed"}), timeout=15)
+
+    printer = (await client.get(f"/api/printers/{simulator['id']}")).json()
+    assert printer["bed_cleared"] is False
+
+
 async def test_imprimante_virtuelle_flux_complet(client, monkeypatch):
     """Imprimer -> envoi NAS -> demarrage confirme -> fin confirmee -> plateau a confirmer."""
     import sys

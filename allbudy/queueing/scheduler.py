@@ -260,6 +260,13 @@ class JobScheduler:
                     job_id=job.id,
                     session=session,
                 )
+                if printer_id is not None:
+                    # Meme logique que sur une reussite: la piece (ratee) peut
+                    # encore etre sur le plateau, on ne renvoie rien dessus
+                    # avant confirmation manuelle.
+                    printer = await session.get(Printer, printer_id)
+                    if printer is not None:
+                        printer.bed_cleared = False
         bus.publish("job.updated", {"job_id": job.id, "status": job.status})
 
     async def _notify_print_finished(self, printer_id: int, job_id: int) -> None:

@@ -14,12 +14,14 @@ export function dashboardView(navigate) {
    * machine ne renvoie qu'un nom de fichier.
    */
   let libraryByName = new Map();
+  /** Etat persiste (bed_cleared...) par imprimante: absent du flux WebSocket. */
+  let printerMetaById = new Map();
 
   const root = el('div', {}, [
     el('div', { class: 'page-head' }, [
       el('h1', { text: 'Tableau de bord' }),
       el('div', { class: 'spacer' }),
-      el('button', { text: 'Actualiser', onClick: () => { refreshStats(); loadLibrary(); } }),
+      el('button', { text: 'Actualiser', onClick: () => { refreshStats(); loadLibrary(); loadPrinterMeta(); } }),
     ]),
     statsRow,
     el('h2', { style: 'margin-top:1.5rem', text: 'Parc' }),
@@ -52,11 +54,25 @@ export function dashboardView(navigate) {
     }
     for (const entry of entries) {
       const extra = libraryEntry(entry.status && entry.status.filename);
+      const meta = printerMetaById.get(entry.printer_id);
       printersGrid.append(printerCard(entry, {
         onOpen: (id) => navigate(`printer/${id}`),
+        onRefresh: loadPrinterMeta,
         pieces: extra.pieces,
         thumbnail: extra.thumbnail,
+        bedCleared: meta ? meta.bed_cleared : null,
       }));
+    }
+  }
+
+  async function loadPrinterMeta() {
+    try {
+      const printers = await api.printers();
+      printerMetaById = new Map(printers.map((p) => [p.id, p]));
+      renderPrinters();
+    } catch (error) {
+      // Sans ces metadonnees, les cartes restent affichables sans le badge plateau.
+      console.warn('Metadonnees imprimantes indisponibles', error);
     }
   }
 
@@ -106,6 +122,7 @@ export function dashboardView(navigate) {
   renderPrinters();
   refreshStats();
   loadLibrary();
-  const timer = setInterval(refreshStats, 20000);
+  loadPrinterMeta();
+  const timer = setInterval(() => { refreshStats(); loadPrinterMeta(); }, 20000);
   return root;
 }

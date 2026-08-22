@@ -294,7 +294,9 @@ export function printerIcon(model, { size = 32 } = {}) {
  * Carte d'imprimante du tableau de bord.
  * `entry` est la charge utile temps reel poussee par le WebSocket.
  */
-export function printerCard(entry, { onOpen, onRefresh, pieces = null, thumbnail = null } = {}) {
+export function printerCard(entry, {
+  onOpen, onRefresh, pieces = null, thumbnail = null, bedCleared = null,
+} = {}) {
   const status = entry.status || {};
   const connected = entry.connected;
   const state = connected ? status.state : 'offline';
@@ -304,6 +306,11 @@ export function printerCard(entry, { onOpen, onRefresh, pieces = null, thumbnail
     await run(() => api.printerCommand(entry.printer_id, action, body));
     if (onRefresh) onRefresh();
   };
+
+  const clearBed = () => run(async () => {
+    await api.patch(`api/printers/${entry.printer_id}`, { bed_cleared: true });
+    if (onRefresh) onRefresh();
+  }, 'Plateau confirme vide');
 
   // Bandeau de connexion: l'etat du lien est distinct de l'etat d'impression.
   const link = el('div', { class: `link-state ${connected ? 'up' : 'down'}` }, [
@@ -320,6 +327,11 @@ export function printerCard(entry, { onOpen, onRefresh, pieces = null, thumbnail
       el('div', { class: 'sub truncate', text: status.model || '—' }),
     ]),
     el('div', { class: 'spacer' }),
+    bedCleared === false
+      ? el('span', { class: 'bed-icon full', title: 'Plateau non confirme vide', text: '📦' })
+      : bedCleared === true
+        ? el('span', { class: 'bed-icon empty', title: 'Plateau confirme vide', text: '🧹' })
+        : null,
     badge(state),
   ]);
 
@@ -347,6 +359,14 @@ export function printerCard(entry, { onOpen, onRefresh, pieces = null, thumbnail
   }
 
   body.push(cfsSection(status.spools, entry.capabilities, { connected }));
+
+  if (bedCleared === false) {
+    body.push(el('button', {
+      class: 'primary bed-clear-btn', text: '🧹 Marquer le plateau vide',
+      title: 'Confirme que la piece a ete retiree: libere la machine pour le travail suivant',
+      onClick: clearBed,
+    }));
+  }
 
   body.push(el('div', { class: 'row card-actions' }, [
     el('button', { class: 'sm', text: 'Details', onClick: () => onOpen && onOpen(entry.printer_id) }),

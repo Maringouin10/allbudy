@@ -266,6 +266,18 @@ label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: .2
 }
 .card-actions { padding-top: .2rem; border-top: 1px solid var(--line); margin-top: .1rem; }
 
+.bed-icon {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%; font-size: .95rem;
+}
+.bed-icon.empty { background: rgba(46, 204, 113, .14); }
+.bed-icon.full { background: rgba(241, 196, 15, .16); animation: bed-pulse 2s ease-in-out infinite; }
+@keyframes bed-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(241, 196, 15, .35); }
+  50% { box-shadow: 0 0 0 5px rgba(241, 196, 15, 0); }
+}
+.bed-clear-btn { width: 100%; font-weight: 650; }
+
 .printer-icon {
   flex: none; display: flex; align-items: center; justify-content: center;
   background: var(--accent-soft); color: var(--accent); border-radius: var(--radius-sm);
