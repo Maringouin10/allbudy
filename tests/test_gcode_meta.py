@@ -67,6 +67,32 @@ def test_multi_material_lists():
     assert meta.filament_colors == ["#FF0000", "#00FF00", "#0000FF"]
 
 
+def test_creality_print_cfs_toolchange_ne_masque_pas_les_vraies_couleurs():
+    """Format reel Creality Print (CFS): un evenement de changement d'outil
+    dans le corps ("; material : PLA -> PLA") et une pastille par extrudeuse
+    physique ("; extruder_colour") ne doivent pas ecraser les vraies valeurs
+    par materiau/couleur ecrites plus loin dans le bloc de reglages."""
+    text = (
+        "; CP TOOLCHANGE START\n"
+        "; toolchange #1\n"
+        "; material : PLA -> PLA\n"
+        "; CP TOOLCHANGE END\n"
+        "G28\n"
+        "; extruder_colour = #FCE94F\n"
+        "; filament_colour = #C12E1F;#FFFFFF\n"
+        "; filament_type = PLA;PLA\n"
+    )
+    meta = parse_gcode_text(text)
+    assert meta.filament_types == ["PLA", "PLA"]
+    assert meta.filament_colors == ["#C12E1F", "#FFFFFF"]
+
+
+def test_extruder_colour_sert_de_repli_si_aucune_couleur_par_materiau():
+    text = "; extruder_colour = #FCE94F\n"
+    meta = parse_gcode_text(text)
+    assert meta.filament_colors == ["#FCE94F"]
+
+
 def test_thumbnail_extraction():
     payload = extract_thumbnail(make_gcode(with_thumbnail=True))
     assert payload is not None
