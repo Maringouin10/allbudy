@@ -153,6 +153,20 @@ class SpoolOut(SpoolBase):
 
 
 # --------------------------------------------------------------------- jobs
+class FilamentRequirement(BaseModel):
+    """Contrainte pour une couleur du fichier: materiau/couleur pris sur une
+    bobine reelle plutot que devines. `None` (a la place de cet objet) laisse
+    cette couleur se deduire des metadonnees du fichier."""
+
+    material: str | None = None
+    color: HexColor | None = None
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, value: str | None) -> str | None:
+        return _validate_hex(value)
+
+
 class JobCreate(BaseModel):
     file_id: int
     name: str | None = None
@@ -160,6 +174,7 @@ class JobCreate(BaseModel):
     copies: int = Field(default=1, ge=1, le=999)
     required_material: str | None = None
     required_color: HexColor | None = None
+    required_filaments: list[FilamentRequirement | None] = Field(default_factory=list)
     color_tolerance: int = Field(default=40, ge=0, le=255)
     required_nozzle: float | None = Field(default=None, gt=0, le=2.0)
     required_tags: list[str] = Field(default_factory=list)
@@ -181,6 +196,7 @@ class JobUpdate(BaseModel):
     copies: int | None = Field(default=None, ge=1, le=999)
     required_material: str | None = None
     required_color: HexColor | None = None
+    required_filaments: list[FilamentRequirement | None] | None = None
     color_tolerance: int | None = Field(default=None, ge=0, le=255)
     required_nozzle: float | None = Field(default=None, gt=0, le=2.0)
     required_tags: list[str] | None = None
@@ -210,6 +226,7 @@ class JobOut(BaseModel):
     auto_start: bool
     required_material: str | None
     required_color: str | None
+    required_filaments: list[Any]
     color_tolerance: int
     required_nozzle: float | None
     required_tags: list[Any]

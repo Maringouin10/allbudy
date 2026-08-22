@@ -68,6 +68,9 @@ async def create_job(payload: JobCreate, session: AsyncSession = Depends(get_ses
         copies=payload.copies,
         required_material=payload.required_material,
         required_color=payload.required_color,
+        required_filaments=[
+            entry.model_dump() if entry else None for entry in payload.required_filaments
+        ],
         color_tolerance=payload.color_tolerance,
         required_nozzle=payload.required_nozzle,
         required_tags=payload.required_tags,

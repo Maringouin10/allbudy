@@ -1,8 +1,12 @@
-/** Depots distants FTP / FTPS / SFTP. */
+/** Depots distants FTP / FTPS / SFTP: configuration (embarque dans Reglages).
+ *
+ * La navigation dans les dossiers d'un depot se fait desormais depuis
+ * l'ecran Fichiers (sidebar "Depots"): cet ecran ne gere que la
+ * configuration (ajout, identifiants, test, synchronisation complete).
+ */
 import { api } from '../api.js';
 import {
-  clear, confirmDialog, el, emptyState, field, formatBytes, formatDate, modal, run, toast,
-  toastError,
+  clear, confirmDialog, el, emptyState, field, formatDate, modal, run, toast, toastError,
 } from '../ui.js';
 
 const KINDS = [['sftp', 'SFTP (SSH)'], ['ftp', 'FTP'], ['ftps', 'FTPS (FTP + TLS)']];
@@ -66,15 +70,14 @@ function storageForm(storage = {}) {
   return { body, read };
 }
 
-export function storageView() {
+/** Section "Depots" embarquee dans Reglages: configuration uniquement. */
+export function storageSettingsSection() {
   const list = el('div', { class: 'col' });
   const root = el('div', {}, [
-    el('div', { class: 'page-head' }, [
-      el('h1', { text: 'Depots distants' }),
-      el('div', { class: 'spacer' }),
-      el('button', { class: 'primary', text: '+ Depot', onClick: () => openEditor() }),
+    el('div', { class: 'row', style: 'margin-bottom:.5rem' }, [
+      el('p', { class: 'small muted', style: 'flex:1;margin:0', text: 'Recuperez vos fichiers tranches depuis un NAS ou un serveur de l\'atelier, ou renvoyez-y la bibliotheque pour sauvegarde. Parcourez leur contenu depuis l\'ecran Fichiers.' }),
+      el('button', { class: 'sm primary', text: '+ Depot', onClick: () => openEditor() }),
     ]),
-    el('p', { class: 'small muted', text: 'Recuperez vos fichiers tranches depuis un NAS ou un serveur de l\'atelier, ou renvoyez-y la bibliotheque pour sauvegarde.' }),
     list,
   ]);
 
@@ -99,58 +102,6 @@ export function storageView() {
     });
   }
 
-  function browse(storage) {
-    modal({
-      title: `Parcourir ${storage.name}`,
-      submitLabel: null,
-      wide: true,
-      render: async (body) => {
-        const pathInput = el('input', { value: storage.remote_path || '/' });
-        const results = el('div', { style: 'margin-top:.8rem' });
-        const load = async () => {
-          clear(results).append(el('p', { class: 'muted', text: 'Chargement...' }));
-          try {
-            const data = await api.get(
-              `api/storage/${storage.id}/browse?path=${encodeURIComponent(pathInput.value)}`);
-            clear(results);
-            if (!data.entries.length) {
-              results.append(el('p', { text: 'Aucun fichier imprimable dans ce repertoire.' }));
-              return;
-            }
-            for (const entry of data.entries) {
-              results.append(el('div', { class: 'queue-item' }, [
-                el('div', { class: 'grow' }, [
-                  el('div', { class: 'truncate', text: entry.name }),
-                  el('div', { class: 'small muted', text: `${formatBytes(entry.size)} · ${formatDate(entry.modified)}` }),
-                ]),
-                entry.imported
-                  ? el('span', { class: 'badge', text: 'importe' })
-                  : el('button', {
-                      class: 'sm primary', text: 'Importer',
-                      onClick: () => run(async () => {
-                        await api.post(`api/storage/${storage.id}/import`, { path: entry.path });
-                        load();
-                      }, `${entry.name} importe`),
-                    }),
-              ]));
-            }
-          } catch (error) {
-            clear(results);
-            toastError(error);
-          }
-        };
-        body.append(
-          el('div', { class: 'row' }, [
-            el('div', { style: 'flex:1' }, [pathInput]),
-            el('button', { text: 'Lister', onClick: load }),
-          ]),
-          results,
-        );
-        load();
-      },
-    });
-  }
-
   function storageCard(storage) {
     return el('div', { class: 'card' }, [
       el('div', { class: 'row' }, [
@@ -160,7 +111,6 @@ export function storageView() {
         storage.enabled ? null : el('span', { class: 'badge offline', text: 'desactive' }),
         el('div', { style: 'flex:1' }),
         el('button', { class: 'sm', text: 'Tester', onClick: () => run(() => api.post(`api/storage/${storage.id}/test`)) }),
-        el('button', { class: 'sm', text: 'Parcourir', onClick: () => browse(storage) }),
         el('button', {
           class: 'sm primary', text: 'Synchroniser',
           onClick: () => run(async () => {

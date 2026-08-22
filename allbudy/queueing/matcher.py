@@ -84,11 +84,35 @@ class MatchResult:
 
 
 def job_requirements(job: Job, file: GcodeFile | None) -> list[Requirement]:
-    """Filaments necessaires: contraintes explicites du travail, sinon metadonnees.
+    """Filaments necessaires, un par couleur du fichier.
 
-    Un travail qui force une matiere/couleur ignore ce que dit le fichier: c'est
-    l'operateur qui tranche.
+    Trois sources possibles, dans cet ordre de priorite:
+    1. `required_filaments`: une entree par couleur, chacune soit une bobine
+       precise choisie par l'operateur (materiau+couleur pris sur une bobine
+       reelle plutot que devines), soit None pour laisser cette couleur se
+       deduire des metadonnees du fichier (utile sur un fichier multi-couleur
+       ou seule une partie des teintes doit etre forcee).
+    2. `required_material`/`required_color`: ancienne contrainte a une seule
+       couleur, conservee pour compatibilite API.
+    3. Les metadonnees du fichier (filament_types/filament_colors).
     """
+    meta = (file.meta if file else None) or {}
+    materials = [normalize_material(m) for m in meta.get("filament_types", [])]
+    colors = list(meta.get("filament_colors", []))
+
+    overrides = job.required_filaments
+    if overrides:
+        requirements = []
+        for index, entry in enumerate(overrides):
+            entry = entry or {}
+            material = normalize_material(entry.get("material")) or (
+                materials[index] if index < len(materials) else ""
+            )
+            color = entry.get("color") or (colors[index] if index < len(colors) else None)
+            if material or color:
+                requirements.append(Requirement(material=material, color=color))
+        return requirements
+
     if job.required_material or job.required_color:
         return [
             Requirement(
@@ -97,9 +121,6 @@ def job_requirements(job: Job, file: GcodeFile | None) -> list[Requirement]:
             )
         ]
 
-    meta = (file.meta if file else None) or {}
-    materials = [normalize_material(m) for m in meta.get("filament_types", [])]
-    colors = list(meta.get("filament_colors", []))
     count = max(len(materials), len(colors))
     requirements = [
         Requirement(

@@ -3,14 +3,12 @@ import { api } from './api.js';
 import { connectSocket, on, state } from './store.js';
 import { clear, el, toastError } from './ui.js';
 import { dashboardView } from './views/dashboard.js';
-import { eventsView } from './views/events.js';
 import { filesView } from './views/files.js';
 import { printerDetailView } from './views/printer.js';
 import { printersView } from './views/printers.js';
 import { queueView } from './views/queue.js';
 import { settingsView } from './views/settings.js';
 import { spoolsView } from './views/spools.js';
-import { storageView } from './views/storage.js';
 
 const NAV = [
   ['dashboard', '◧', 'Tableau de bord'],
@@ -18,10 +16,11 @@ const NAV = [
   ['queue', '📋', 'File d\'attente'],
   ['files', '📂', 'Fichiers'],
   ['spools', '🧵', 'Filaments'],
-  ['storage', '🗄', 'Depots'],
-  ['events', '📜', 'Journal'],
   ['settings', '⚙', 'Reglages'],
 ];
+
+// Anciennes routes deplacees dans Reglages (favoris/liens existants).
+const ROUTE_REDIRECTS = { storage: 'settings', events: 'settings' };
 
 const app = document.getElementById('app');
 let currentView = null;
@@ -43,8 +42,6 @@ function buildView(route) {
     case 'queue': return queueView(navigate);
     case 'files': return filesView(navigate);
     case 'spools': return spoolsView(navigate);
-    case 'storage': return storageView(navigate);
-    case 'events': return eventsView(navigate);
     case 'settings': return settingsView(navigate);
     default: return dashboardView(navigate);
   }
@@ -92,6 +89,10 @@ function renderShell() {
   function render() {
     const route = currentRoute();
     const section = route.split('/')[0];
+    if (ROUTE_REDIRECTS[section]) {
+      navigate(ROUTE_REDIRECTS[section]);
+      return;
+    }
     for (const [key, button] of navButtons) {
       const active = key === section || (section === 'printer' && key === 'printers');
       button.classList.toggle('active', active);

@@ -285,6 +285,41 @@ async def test_travail_incompatible_reste_en_file(client, simulator):
     assert still_queued["status"] == "queued"
 
 
+async def test_required_filaments_multi_couleur(client, simulator):
+    """Une couleur par bobine choisie, plutot que devinee depuis le fichier."""
+    file = await upload_gcode(client, "bicolore.gcode")
+    await wait_until(lambda: _inventory_ready(client, simulator["id"]), timeout=10)
+
+    # Le simulateur charge PLA rouge (#E74C3C) et PLA vert (#27AE60) par defaut.
+    job = (await client.post("/api/jobs", json={
+        "file_id": file["id"],
+        "required_filaments": [
+            {"material": "PLA", "color": "#E74C3C"},
+            {"material": "PLA", "color": "#27AE60"},
+        ],
+    })).json()
+    assert job["required_filaments"] == [
+        {"material": "PLA", "color": "#E74C3C"},
+        {"material": "PLA", "color": "#27AE60"},
+    ]
+
+    await wait_until(lambda: _job_status(client, job["id"], {"printing", "sending"}), timeout=15)
+    dispatched = (await client.get(f"/api/jobs/{job['id']}")).json()
+    assert dispatched["printer_id"] == simulator["id"]
+
+
+async def test_required_filaments_partiel_avec_auto(client):
+    """Une entree null dans required_filaments retombe sur les metadonnees du fichier."""
+    file = await upload_gcode(client, "mix.gcode", material="PLA", color="#E74C3C")
+    response = await client.post("/api/jobs", json={
+        "file_id": file["id"], "required_filaments": [None],
+    })
+    assert response.status_code == 201
+    match = await client.get(f"/api/jobs/{response.json()['id']}/match")
+    # Une seule exigence (celle du fichier): reprend le comportement d'origine.
+    assert match.status_code == 200
+
+
 async def test_reordonnancement_de_la_file(client):
     file = await upload_gcode(client)
     ids = []

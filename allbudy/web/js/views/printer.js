@@ -19,6 +19,8 @@ export function printerDetailView(printerId, navigate) {
   const consoleCard = el('div', { class: 'card' });
   let printer = null;
   let jogStep = 10;
+  /** Index de la bibliotheque par nom envoye a la machine (pieces, miniature). */
+  let libraryByName = new Map();
 
   const root = el('div', {}, [
     header,
@@ -76,6 +78,17 @@ export function printerDetailView(printerId, navigate) {
     ]);
   }
 
+  function libraryEntry(filename) {
+    if (!filename) return {};
+    const name = String(filename).split('/').pop();
+    const file = libraryByName.get(name);
+    if (!file) return {};
+    return {
+      pieces: (file.meta || {}).object_count || null,
+      thumbnail: file.thumbnail ? apiUrl(`api/files/${file.id}/thumbnail`) : null,
+    };
+  }
+
   function renderStatus() {
     const live = printerState(id);
     clear(statusCard);
@@ -91,7 +104,11 @@ export function printerDetailView(printerId, navigate) {
     }
 
     if (status.state === 'printing' || status.state === 'paused') {
+      const extra = libraryEntry(status.filename);
       statusCard.append(
+        extra.thumbnail
+          ? el('img', { class: 'print-thumb', src: extra.thumbnail, alt: '', style: 'max-width:120px;border-radius:8px;float:right;margin:0 0 .4rem .6rem' })
+          : null,
         el('div', { class: 'small truncate', text: status.filename || '' }),
         el('div', { class: 'progress-line', style: 'margin:.4rem 0' }, [
           el('div', { style: `width:${Math.min(100, status.progress || 0)}%` }),
@@ -101,6 +118,7 @@ export function printerDetailView(printerId, navigate) {
           status.current_layer ? el('span', { text: `couche ${status.current_layer}/${status.total_layers || '?'}` }) : null,
           status.elapsed_time != null ? el('span', { text: `ecoule ${formatDuration(status.elapsed_time)}` }) : null,
           status.remaining_time != null ? el('span', { text: `reste ${formatDuration(status.remaining_time)}` }) : null,
+          extra.pieces ? el('span', { text: `${extra.pieces} piece(s)` }) : null,
         ]),
         el('div', { class: 'row', style: 'margin-top:.6rem' }, [
           status.state === 'printing'
@@ -289,6 +307,17 @@ export function printerDetailView(printerId, navigate) {
     );
   }
 
+  async function loadLibrary() {
+    try {
+      const data = await api.files('?limit=500');
+      libraryByName = new Map(data.items.map((file) => [file.stored_name, file]));
+      renderStatus();
+    } catch (error) {
+      // Sans la bibliotheque, le statut reste affichable: on n'alerte pas.
+      console.warn('Index de la bibliotheque indisponible', error);
+    }
+  }
+
   async function load() {
     try {
       printer = await api.get(`api/printers/${id}`);
@@ -303,6 +332,7 @@ export function printerDetailView(printerId, navigate) {
     renderCfs();
     renderConsole();
     renderFiles();
+    loadLibrary();
   }
 
   const unsubscribe = on('printer', (entry) => {

@@ -33,6 +33,7 @@ def make_job(**kwargs) -> Job:
         "color_tolerance": 40,
         "required_tags": [],
         "allowed_printers": [],
+        "required_filaments": [],
     }
     return Job(**{**defaults, **kwargs})
 
@@ -88,6 +89,53 @@ def test_le_travail_prime_sur_le_fichier():
     assert len(requirements) == 1
     assert requirements[0].material == "ABS"
     assert requirements[0].color == "#000000"
+
+
+def test_required_filaments_force_une_bobine_par_couleur():
+    """Chaque couleur du fichier peut etre forcee sur une bobine reelle."""
+    file = make_file({"filament_types": ["PLA", "PETG"], "filament_colors": ["#FF0000", "#00FF00"]})
+    job = make_job(
+        required_filaments=[
+            {"material": "ABS", "color": "#000000"},
+            {"material": "TPU", "color": "#FFFFFF"},
+        ]
+    )
+    requirements = job_requirements(job, file)
+    assert [(r.material, r.color) for r in requirements] == [
+        ("ABS", "#000000"),
+        ("TPU", "#FFFFFF"),
+    ]
+
+
+def test_required_filaments_mixe_forcage_et_auto():
+    """Une entree None laisse cette couleur se deduire du fichier."""
+    file = make_file({"filament_types": ["PLA", "PETG"], "filament_colors": ["#FF0000", "#00FF00"]})
+    job = make_job(required_filaments=[{"material": "ABS", "color": "#000000"}, None])
+    requirements = job_requirements(job, file)
+    assert [(r.material, r.color) for r in requirements] == [
+        ("ABS", "#000000"),
+        ("PETG", "#00FF00"),
+    ]
+
+
+def test_required_filaments_priment_sur_required_material():
+    """Le nouveau mecanisme (multi-couleur) l'emporte sur l'ancien (mono-couleur)."""
+    file = make_file({})
+    job = make_job(
+        required_material="ABS",
+        required_color="#000000",
+        required_filaments=[{"material": "PLA", "color": "#FF0000"}],
+    )
+    requirements = job_requirements(job, file)
+    assert [(r.material, r.color) for r in requirements] == [("PLA", "#FF0000")]
+
+
+def test_required_filaments_vide_ignore():
+    """Une liste vide (defaut) ne doit pas empecher le repli sur le fichier."""
+    file = make_file({"filament_types": ["PLA"], "filament_colors": ["#FF0000"]})
+    job = make_job(required_filaments=[])
+    requirements = job_requirements(job, file)
+    assert [(r.material, r.color) for r in requirements] == [("PLA", "#FF0000")]
 
 
 # ----------------------------------------------------------- appariement

@@ -37,6 +37,7 @@ class RemoteEntry:
     path: str
     size: int = 0
     modified: float | None = None
+    is_dir: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +47,7 @@ class RemoteEntry:
             "modified": datetime.fromtimestamp(self.modified, UTC).isoformat()
             if self.modified
             else None,
+            "is_dir": self.is_dir,
         }
 
 
@@ -78,7 +80,10 @@ def _ftp_list(storage: RemoteStorage, path: str) -> list[RemoteEntry]:
         client.cwd(path or "/")
         entries: list[RemoteEntry] = []
         for name, facts in client.mlsd():
-            if facts.get("type") not in ("file", None) or not _is_printable(name):
+            if name in (".", ".."):
+                continue
+            is_dir = facts.get("type") == "dir"
+            if not is_dir and (facts.get("type") not in ("file", None) or not _is_printable(name)):
                 continue
             modified = None
             raw_time = facts.get("modify")
@@ -95,11 +100,14 @@ def _ftp_list(storage: RemoteStorage, path: str) -> list[RemoteEntry]:
                     path=_join(path, name),
                     size=int(facts.get("size") or 0),
                     modified=modified,
+                    is_dir=is_dir,
                 )
             )
         return entries
     except ftplib.error_perm as exc:
-        # Les serveurs anciens n'implementent pas MLSD: repli sur NLST.
+        # Les serveurs anciens n'implementent pas MLSD: repli sur NLST, qui ne
+        # distingue pas les dossiers des fichiers -- on ne peut alors naviguer
+        # que dans les fichiers imprimables du repertoire courant.
         if "MLSD" not in str(exc).upper() and "500" not in str(exc):
             raise
         names = client.nlst()
@@ -163,9 +171,8 @@ def _sftp_list(storage: RemoteStorage, path: str) -> list[RemoteEntry]:
     try:
         entries: list[RemoteEntry] = []
         for attr in sftp.listdir_attr(path or "/"):
-            if attr.st_mode and stat.S_ISDIR(attr.st_mode):
-                continue
-            if not _is_printable(attr.filename):
+            is_dir = bool(attr.st_mode and stat.S_ISDIR(attr.st_mode))
+            if not is_dir and not _is_printable(attr.filename):
                 continue
             entries.append(
                 RemoteEntry(
@@ -173,6 +180,7 @@ def _sftp_list(storage: RemoteStorage, path: str) -> list[RemoteEntry]:
                     path=_join(path, attr.filename),
                     size=int(attr.st_size or 0),
                     modified=float(attr.st_mtime) if attr.st_mtime else None,
+                    is_dir=is_dir,
                 )
             )
         return entries
@@ -240,8 +248,9 @@ async def upload_remote(storage: RemoteStorage, source: Path, remote_path: str) 
 
 
 async def test_connection(storage: RemoteStorage) -> int:
-    """Verifie les identifiants et retourne le nombre de fichiers visibles."""
-    return len(await list_remote(storage))
+    """Verifie les identifiants et retourne le nombre de fichiers imprimables visibles."""
+    entries = await list_remote(storage)
+    return sum(1 for e in entries if not e.is_dir)
 
 
 async def import_entry(
@@ -280,7 +289,9 @@ async def sync_storage(session: AsyncSession, storage: RemoteStorage) -> dict[st
     imported: list[str] = []
     errors: list[str] = []
     for entry in entries:
-        if entry.path in known:
+        # La synchronisation reste volontairement non recursive: seuls les
+        # fichiers du repertoire configure sont importes, pas ses sous-dossiers.
+        if entry.is_dir or entry.path in known:
             continue
         try:
             record, created = await import_entry(session, storage, entry)

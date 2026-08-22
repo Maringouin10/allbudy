@@ -182,6 +182,12 @@ class Job(Base):
     # Contraintes d'attribution
     required_material: Mapped[str | None] = mapped_column(String(32), nullable=True)
     required_color: Mapped[str | None] = mapped_column(String(9), nullable=True)
+    """Contrainte a une seule couleur/matiere; conservee pour compatibilite API.
+    Ignoree des que required_filaments est renseigne."""
+    required_filaments: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    """Une entree par couleur du fichier (dans l'ordre), chacune soit
+    {"material":..., "color":...} pour forcer une bobine precise, soit None
+    pour laisser cette couleur se deduire des metadonnees du fichier."""
     color_tolerance: Mapped[int] = mapped_column(Integer, default=40)
     """Distance RGB maximale toleree pour considerer deux couleurs identiques."""
     required_nozzle: Mapped[float | None] = mapped_column(Float, nullable=True)

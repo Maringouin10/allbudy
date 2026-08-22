@@ -100,6 +100,31 @@ export function spoolsView() {
   }
 
   function spoolRow(spool) {
+    const actions = [
+      spool.managed ? el('span', { class: 'badge', text: 'CFS' }) : null,
+      el('button', { class: 'sm', text: 'Modifier', onClick: () => openEditor(spool) }),
+      el('button', {
+        class: 'sm danger', text: '✕',
+        onClick: () => confirmDialog('Supprimer cette bobine de l\'inventaire ?', async () => {
+          await run(() => api.del(`api/spools/${spool.id}`));
+          refresh();
+        }, { submitLabel: 'Supprimer' }),
+      }),
+    ];
+
+    // Un emplacement vide n'a rien a montrer (materiau, couleur, pourcentage):
+    // une ligne courte plutot que des champs vides ou perimes.
+    if (spool.empty) {
+      return el('div', { class: 'queue-item', style: 'opacity:.55' }, [
+        el('span', {
+          class: 'chip',
+          style: 'background:var(--panel-2);width:22px;height:22px;border-radius:6px;border:1px solid rgba(255,255,255,.2)',
+        }),
+        el('div', { class: 'grow small muted', text: `Emplacement ${spool.slot} — vide` }),
+        ...actions,
+      ]);
+    }
+
     const percent = spool.remaining_g != null && spool.total_g
       ? Math.round((spool.remaining_g / spool.total_g) * 100)
       : null;
@@ -110,22 +135,14 @@ export function spoolsView() {
       }),
       el('div', { class: 'grow' }, [
         el('div', {}, [
-          el('strong', { text: spool.empty ? 'Vide' : spool.material }),
+          el('strong', { text: spool.material }),
           spool.color_name ? el('span', { class: 'small muted', text: ` ${spool.color_name}` }) : null,
           spool.vendor ? el('span', { class: 'small muted', text: ` · ${spool.vendor}` }) : null,
         ]),
         el('div', { class: 'small muted', text: `unite ${spool.unit} · emplacement ${spool.slot}${percent != null ? ` · ${percent} % restant` : ''}` }),
       ]),
       spool.active ? el('span', { class: 'badge printing', text: 'chargee' }) : null,
-      spool.managed ? el('span', { class: 'badge', text: 'CFS' }) : null,
-      el('button', { class: 'sm', text: 'Modifier', onClick: () => openEditor(spool) }),
-      el('button', {
-        class: 'sm danger', text: '✕',
-        onClick: () => confirmDialog('Supprimer cette bobine de l\'inventaire ?', async () => {
-          await run(() => api.del(`api/spools/${spool.id}`));
-          refresh();
-        }, { submitLabel: 'Supprimer' }),
-      }),
+      ...actions,
     ]);
   }
 

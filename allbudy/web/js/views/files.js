@@ -29,6 +29,12 @@ function filamentChips(file) {
       materialChip(types[i] || '?', colors[i] || '#7f8c8d')));
 }
 
+/** Icone pour une entree de depot distant, selon son type/extension. */
+function entryIcon(entry) {
+  if (entry.is_dir) return '📁';
+  return /\.(gcode|gco|g)$/i.test(entry.name) ? '🧩' : /\.3mf$/i.test(entry.name) ? '📦' : '📄';
+}
+
 export function filesView() {
   const grid = el('div', { class: 'grid files' });
   const searchInput = el('input', { placeholder: 'Rechercher un fichier...', style: 'max-width:260px' });
@@ -36,17 +42,139 @@ export function filesView() {
   const fileInput = el('input', { type: 'file', accept: '.gcode,.gco,.g,.3mf', multiple: true, style: 'display:none' });
   const counter = el('div', { class: 'small muted' });
 
-  const root = el('div', {}, [
-    el('div', { class: 'page-head' }, [
-      el('h1', { text: 'Fichiers' }),
-      el('div', { class: 'spacer' }),
-      searchInput,
-      el('button', { text: 'Actualiser', onClick: () => refresh() }),
+  const libraryHead = el('div', { class: 'page-head' }, [
+    el('h1', { text: 'Fichiers' }),
+    el('div', { class: 'spacer' }),
+    searchInput,
+    el('button', { text: 'Actualiser', onClick: () => refresh() }),
+  ]);
+  const libraryPane = el('div', {}, [libraryHead, dropzone, fileInput, counter, grid]);
+  const browsePane = el('div', { style: 'display:none' });
+
+  /** Barre laterale « sources »: bibliotheque locale + depots distants (a la Bambuddy). */
+  let storages = [];
+  let activeSource = 'library';
+  const sourceList = el('div', { class: 'col', style: 'gap:.2rem' });
+
+  function sourceButton(key, icon, label) {
+    const active = activeSource === key;
+    return el('button', {
+      class: 'sm ghost',
+      style: `justify-content:flex-start;width:100%;text-align:left;${active ? 'background:var(--accent-soft);color:var(--accent);font-weight:600' : ''}`,
+      onClick: () => {
+        if (key === 'library') showLibrary();
+        else showStorage(storages.find((s) => s.id === key));
+      },
+    }, [`${icon} ${label}`]);
+  }
+
+  function renderSidebar() {
+    clear(sourceList);
+    sourceList.append(sourceButton('library', '📂', 'Bibliotheque'));
+    for (const storage of storages) sourceList.append(sourceButton(storage.id, '🗄', storage.name));
+  }
+
+  async function loadStorages() {
+    try {
+      storages = await api.storages();
+      renderSidebar();
+    } catch (error) {
+      console.warn('Depots distants indisponibles', error);
+    }
+  }
+
+  function showLibrary() {
+    activeSource = 'library';
+    renderSidebar();
+    libraryPane.style.display = '';
+    browsePane.style.display = 'none';
+  }
+
+  function showStorage(storage, path) {
+    if (!storage) return;
+    activeSource = storage.id;
+    renderSidebar();
+    libraryPane.style.display = 'none';
+    browsePane.style.display = '';
+    renderBrowse(storage, path || null);
+  }
+
+  function breadcrumb(storage, path) {
+    const root = storage.remote_path || '/';
+    const relative = (path || root).slice(root.length).split('/').filter(Boolean);
+    const crumbs = [el('a', { href: '#', text: storage.name, onClick: (event) => { event.preventDefault(); renderBrowse(storage, root); } })];
+    let acc = root;
+    for (const part of relative) {
+      acc = acc.endsWith('/') ? `${acc}${part}` : `${acc}/${part}`;
+      const target = acc;
+      crumbs.push(el('span', { class: 'muted', text: ' / ' }));
+      crumbs.push(el('a', { href: '#', text: part, onClick: (event) => { event.preventDefault(); renderBrowse(storage, target); } }));
+    }
+    return el('div', { class: 'small', style: 'margin-bottom:.6rem' }, crumbs);
+  }
+
+  async function renderBrowse(storage, path) {
+    clear(browsePane).append(
+      el('div', { class: 'page-head' }, [
+        el('h1', { text: storage.name }),
+        el('div', { class: 'spacer' }),
+        el('button', { text: 'Actualiser', onClick: () => renderBrowse(storage, path) }),
+      ]),
+      el('p', { class: 'small muted', text: 'Parcourez le depot et importez les fichiers voulus dans la bibliotheque.' }),
+      el('div', { class: 'card' }, [el('p', { class: 'small muted', text: 'Chargement...' })]),
+    );
+    try {
+      const data = await api.browseStorage(storage.id, path);
+      const card = el('div', { class: 'col' });
+      card.append(breadcrumb(storage, data.path));
+      if (!data.entries.length) {
+        card.append(emptyState('🗄️', 'Dossier vide.'));
+      } else {
+        for (const entry of data.entries) {
+          card.append(el('div', { class: 'queue-item' }, [
+            el('span', { text: entryIcon(entry) }),
+            el('div', {
+              class: 'grow truncate',
+              text: entry.name,
+              style: entry.is_dir ? 'cursor:pointer;font-weight:600' : '',
+              onClick: entry.is_dir ? () => renderBrowse(storage, entry.path) : null,
+            }),
+            !entry.is_dir ? el('span', { class: 'small muted nowrap', text: formatBytes(entry.size) }) : null,
+            !entry.is_dir ? el('span', { class: 'small muted nowrap', text: entry.modified ? formatDate(entry.modified) : '' }) : null,
+            entry.is_dir
+              ? el('button', { class: 'sm', text: 'Ouvrir', onClick: () => renderBrowse(storage, entry.path) })
+              : el('button', {
+                class: `sm ${entry.imported ? '' : 'primary'}`,
+                text: entry.imported ? 'Deja importe' : 'Importer',
+                disabled: entry.imported,
+                onClick: () => run(async () => {
+                  await api.importFromStorage(storage.id, entry.path);
+                  renderBrowse(storage, data.path);
+                }, `${entry.name} importe`),
+              }),
+          ]));
+        }
+      }
+      clear(browsePane).append(
+        el('div', { class: 'page-head' }, [
+          el('h1', { text: storage.name }),
+          el('div', { class: 'spacer' }),
+          el('button', { text: 'Actualiser', onClick: () => renderBrowse(storage, data.path) }),
+        ]),
+        el('p', { class: 'small muted', text: 'Parcourez le depot et importez les fichiers voulus dans la bibliotheque.' }),
+        el('div', { class: 'card' }, [card]),
+      );
+    } catch (error) {
+      toastError(error);
+    }
+  }
+
+  const root = el('div', { class: 'row', style: 'align-items:flex-start;gap:1.2rem' }, [
+    el('div', { class: 'card', style: 'width:220px;flex:none' }, [
+      el('h3', { text: 'Sources' }),
+      sourceList,
     ]),
-    dropzone,
-    fileInput,
-    counter,
-    grid,
+    el('div', { style: 'flex:1;min-width:0' }, [libraryPane, browsePane]),
   ]);
 
   let searchTimer = null;
@@ -175,8 +303,72 @@ export function filesView() {
     }
   }
 
+  renderSidebar();
   refresh();
+  loadStorages();
   return root;
+}
+
+/**
+ * Une entree de selection de bobine pour un emplacement couleur du fichier:
+ * « auto » laisse deduire des metadonnees, un choix de bobine fige
+ * matiere+couleur sur ce qui a deja ete charge par le passe (plutot que de
+ * deviner), « manuel » permet de saisir matiere/couleur a la main quand
+ * aucune bobine ne correspond encore dans l'inventaire.
+ */
+function colorSlotField(index, total, meta, inventory, spoolById) {
+  const fileMaterial = (meta.filament_types || [])[index] || '';
+  const fileColor = (meta.filament_colors || [])[index] || null;
+
+  const select = el('select', {}, [
+    el('option', {
+      value: 'auto',
+      text: `Auto — ${fileMaterial || 'matiere du fichier'}${fileColor ? ' (couleur du fichier)' : ''}`,
+    }),
+    el('option', { value: 'manual', text: 'Saisie manuelle...' }),
+  ]);
+  for (const group of inventory) {
+    const usable = (group.spools || []).filter((s) => !s.empty);
+    if (!usable.length) continue;
+    const optgroup = el('optgroup', { label: group.printer });
+    for (const spool of usable) {
+      const key = `spool-${spool.id}`;
+      spoolById.set(key, { material: spool.material, color: spool.color_hex });
+      optgroup.append(el('option', {
+        value: key,
+        text: `${spool.material} · ${spool.color_name || spool.color_hex}${spool.vendor ? ` · ${spool.vendor}` : ''}`,
+      }));
+    }
+    select.append(optgroup);
+  }
+
+  const manualMaterial = el('input', { value: fileMaterial, placeholder: 'PLA, PETG, ABS...' });
+  const manualColor = el('input', { type: 'color', value: fileColor || '#7f8c8d' });
+  const manualRow = el('div', { class: 'row', style: 'margin-top:.35rem;display:none' }, [
+    el('div', { style: 'flex:1' }, [manualMaterial]),
+    manualColor,
+  ]);
+  select.addEventListener('change', () => {
+    manualRow.style.display = select.value === 'manual' ? 'flex' : 'none';
+  });
+
+  const node = el('div', { class: 'field' }, [
+    el('label', { text: total > 1 ? `Couleur ${index + 1}` : 'Bobine' }),
+    select,
+    manualRow,
+  ]);
+
+  const read = () => {
+    if (select.value === 'auto') return null;
+    if (select.value === 'manual') {
+      const material = manualMaterial.value.trim();
+      const colorValue = manualColor.value;
+      return material || colorValue ? { material: material || null, color: colorValue || null } : null;
+    }
+    return spoolById.get(select.value) || null;
+  };
+
+  return { node, read };
 }
 
 /** Modale d'ajout a la file, avec contraintes d'attribution. */
@@ -186,13 +378,13 @@ export function queueModal(file, onDone) {
   // DOM casserait au moindre changement de mise en page.
   const copies = el('input', { type: 'number', min: 1, value: 1 });
   const priority = el('input', { type: 'number', value: 0 });
-  const material = el('input', { value: (meta.filament_types || [])[0] || '', placeholder: 'PLA, PETG, ABS...' });
-  const color = el('input', { type: 'color', value: (meta.filament_colors || [])[0] || '#7f8c8d' });
-  const useColor = el('input', { type: 'checkbox', checked: !!(meta.filament_colors || [])[0] });
   const tolerance = el('input', { type: 'range', min: 0, max: 160, value: 40 });
   const nozzle = el('input', { type: 'number', step: '0.05', value: meta.nozzle_diameter || '' });
   const tags = el('input', { placeholder: 'chambre-chauffee, grande-plaque' });
   const printerSelect = el('select', {}, [el('option', { value: '', text: 'N\'importe laquelle (matching auto)' })]);
+  const filamentsBox = el('div', { class: 'col' }, [el('p', { class: 'small muted', text: 'Chargement des bobines...' })]);
+  const spoolById = new Map();
+  let colorSlots = [];
 
   modal({
     title: `Mettre « ${file.filename} » en file`,
@@ -204,11 +396,11 @@ export function queueModal(file, onDone) {
           field('Exemplaires', copies),
           field('Priorite', priority, 'Plus grand = envoye avant'),
         ]),
-        field('Matiere exigee', material, 'Vide = celle du fichier, ou aucune contrainte'),
         el('div', { class: 'field' }, [
-          el('div', { class: 'check' }, [useColor, el('label', { text: 'Exiger une couleur precise' })]),
+          el('label', { text: 'Bobines exigees' }),
+          el('p', { class: 'small muted', style: 'margin:.2rem 0 .5rem', text: 'Choisissez une bobine deja chargee par le passe pour fixer sa couleur au lieu de deviner, ou laissez « Auto » pour vous fier au fichier.' }),
+          filamentsBox,
           el('div', { class: 'row', style: 'margin-top:.4rem' }, [
-            el('div', { style: 'width:60px' }, [color]),
             el('div', { style: 'flex:1' }, [
               el('label', { text: 'Tolerance de teinte' }),
               tolerance,
@@ -228,14 +420,25 @@ export function queueModal(file, onDone) {
       } catch (error) {
         toastError(error);
       }
+      try {
+        const inventory = await api.spoolInventory();
+        const total = Math.max((meta.filament_types || []).length, (meta.filament_colors || []).length, 1);
+        colorSlots = Array.from({ length: total }, (_, i) => colorSlotField(i, total, meta, inventory, spoolById));
+        clear(filamentsBox);
+        for (const slot of colorSlots) filamentsBox.append(slot.node);
+      } catch (error) {
+        clear(filamentsBox);
+        filamentsBox.append(el('p', { class: 'small muted', text: 'Inventaire des bobines indisponible: la couleur se deduira du fichier.' }));
+        toastError(error);
+      }
     },
     onSubmit: async () => {
+      const overrides = colorSlots.map((slot) => slot.read());
       await api.post('api/jobs', {
         file_id: file.id,
         copies: Number(copies.value) || 1,
         priority: Number(priority.value) || 0,
-        required_material: material.value.trim() || null,
-        required_color: useColor.checked ? color.value : null,
+        required_filaments: overrides.some(Boolean) ? overrides : [],
         color_tolerance: Number(tolerance.value),
         required_nozzle: nozzle.value ? Number(nozzle.value) : null,
         required_tags: tags.value.split(',').map((t) => t.trim()).filter(Boolean),

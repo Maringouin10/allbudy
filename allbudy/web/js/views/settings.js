@@ -1,9 +1,19 @@
-/** Reglages de l'instance. */
+/** Reglages de l'instance: systeme, depots distants, journal. */
 import { api } from '../api.js';
 import { clear, el, formatBytes, formatDuration, toastError } from '../ui.js';
+import { eventsSettingsSection } from './events.js';
+import { storageSettingsSection } from './storage.js';
+
+function section(title, content) {
+  return el('div', { class: 'card' }, [
+    el('h3', { text: title }),
+    content,
+  ]);
+}
 
 export function settingsView() {
   const systemCard = el('div', { class: 'card' });
+  const eventsSection = eventsSettingsSection();
 
   const root = el('div', {}, [
     el('div', { class: 'page-head' }, [el('h1', { text: 'Reglages' })]),
@@ -17,6 +27,8 @@ export function settingsView() {
         el('li', { html: '<strong>Firmware d\'origine sans Moonraker</strong> — utilisez le protocole <em>LAN Creality</em> (port 9999).' }),
       ]),
     ]),
+    section('Depots distants', storageSettingsSection()),
+    section('Journal', eventsSection),
   ]);
 
   async function renderSystem() {
@@ -47,5 +59,7 @@ export function settingsView() {
   }
 
   renderSystem();
+  // Le journal ecoute le bus temps reel: se desabonner en quittant Reglages.
+  root.cleanup = eventsSection.cleanup;
   return root;
 }

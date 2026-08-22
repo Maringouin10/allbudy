@@ -139,6 +139,7 @@ async def browse_storage(
         ).all()
         if row
     }
+    entries.sort(key=lambda e: (not e.is_dir, e.name.lower()))
     return {
         "path": path or storage.remote_path,
         "entries": [{**e.to_dict(), "imported": e.path in known} for e in entries],

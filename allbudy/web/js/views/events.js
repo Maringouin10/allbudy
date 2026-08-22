@@ -1,12 +1,12 @@
-/** Journal des evenements. */
+/** Journal des evenements (embarque dans Reglages). */
 import { api } from '../api.js';
 import { on } from '../store.js';
 import { clear, confirmDialog, el, emptyState, formatDate, run, toastError } from '../ui.js';
 
 const LEVEL_CLASS = { info: 'idle', warning: 'paused', error: 'error' };
 
-export function eventsView() {
-  const table = el('div', { class: 'card' });
+export function eventsSettingsSection() {
+  const table = el('div', {});
   const levelSelect = el('select', { style: 'max-width:160px' }, [
     el('option', { value: '', text: 'Tous les niveaux' }),
     el('option', { value: 'info', text: 'Information' }),
@@ -20,14 +20,13 @@ export function eventsView() {
   ]);
 
   const root = el('div', {}, [
-    el('div', { class: 'page-head' }, [
-      el('h1', { text: 'Journal' }),
-      el('div', { class: 'spacer' }),
+    el('div', { class: 'row', style: 'margin-bottom:.5rem' }, [
       levelSelect,
       categorySelect,
-      el('button', { text: 'Actualiser', onClick: refresh }),
+      el('div', { style: 'flex:1' }),
+      el('button', { class: 'sm', text: 'Actualiser', onClick: refresh }),
       el('button', {
-        class: 'danger', text: 'Vider',
+        class: 'sm danger', text: 'Vider',
         onClick: () => confirmDialog('Effacer tout le journal ?', async () => {
           await run(() => api.del('api/system/events?keep_days=0'));
           refresh();

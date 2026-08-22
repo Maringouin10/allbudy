@@ -95,6 +95,9 @@ export const api = {
   jobs: (params = '') => request('GET', `api/jobs${params}`),
   spoolInventory: () => request('GET', 'api/spools/inventory'),
   storages: () => request('GET', 'api/storage'),
+  browseStorage: (id, path) =>
+    request('GET', `api/storage/${id}/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  importFromStorage: (id, path) => request('POST', `api/storage/${id}/import`, { body: { path } }),
   events: (params = '') => request('GET', `api/system/events${params}`),
 };
 
