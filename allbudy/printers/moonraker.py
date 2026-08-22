@@ -67,7 +67,10 @@ _CHAMBER_FAN_HINTS = ("fan_generic chamber_circulation_fan", "fan_generic chambe
 _LIGHT_HINTS = ("output_pin caselight", "output_pin LED", "output_pin light", "led chamber_light")
 
 #: Objets exposant le CFS selon les versions de firmware Creality.
-_CFS_HINTS = ("box", "filament_hub", "cfs")
+#: Une instance nommee (ex: config Klipper `[cfs cfs0]`) apparait comme
+#: "cfs cfs0" dans printer.objects.list: on teste egalement en prefixe/mot-cle.
+_CFS_HINTS = ("box", "filament_hub", "cfs", "material_box", "materialbox")
+_CFS_KEYWORDS = ("cfs", "material_box", "materialbox", "filament_hub", "box")
 
 _KLIPPER_STATE_MAP = {
     "standby": STATE_IDLE,
@@ -252,9 +255,16 @@ class MoonrakerTransport(PrinterTransport):
         self._aux_fan_key = pick(_AUX_FAN_HINTS)
         self._chamber_fan_key = pick(_CHAMBER_FAN_HINTS)
         self._light_key = pick(_LIGHT_HINTS)
-        self._cfs_key = pick(_CFS_HINTS)
+        self._cfs_key = pick(_CFS_HINTS) or self._find_cfs_key()
         if self._cfs_key:
             self.config.has_cfs = True
+            log.info("%s: CFS detecte via l'objet '%s'", self.config.name, self._cfs_key)
+        elif self._available:
+            log.info(
+                "%s: aucun CFS detecte parmi les objets Klipper exposes (%s)",
+                self.config.name,
+                ", ".join(sorted(self._available)),
+            )
 
         # Tout ventilateur restant est remonte en lecture seule: le ventilateur
         # de tete par exemple est asservi au firmware, on l'affiche sans le piloter.
@@ -265,6 +275,20 @@ class MoonrakerTransport(PrinterTransport):
             if name.startswith(("fan_generic ", "heater_fan ", "controller_fan "))
             and name not in known
         ]
+
+    def _find_cfs_key(self) -> str | None:
+        """Repli quand aucun nom exact ne correspond.
+
+        Une instance nommee (config Klipper `[cfs cfs0]`) apparait comme
+        "cfs cfs0": on ne compare que le type (premier mot), jamais le nom
+        choisi par l'utilisateur, pour eviter un faux positif sur un objet
+        sans rapport dont le nom contiendrait par hasard un mot-cle.
+        """
+        for name in self._available:
+            object_type = name.split(" ", 1)[0].lower()
+            if any(keyword in object_type for keyword in _CFS_KEYWORDS):
+                return name
+        return None
 
     def _subscription(self) -> dict[str, Any]:
         objects = dict(_CORE_OBJECTS)

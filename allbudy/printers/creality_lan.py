@@ -100,6 +100,7 @@ class CrealityLanTransport(PrinterTransport):
         self._files: list[RemoteFile] = []
         self._files_event = asyncio.Event()
         self._connected = asyncio.Event()
+        self._cfs_logged = False
 
     @property
     def _ws_url(self) -> str:
@@ -306,7 +307,18 @@ class CrealityLanTransport(PrinterTransport):
         return STATE_PRINTING if as_float(_pick(payload, "progress")) > 0 else STATE_IDLE
 
     def _parse_spools(self) -> list[SpoolState]:
-        for key in ("boxsInfo", "boxInfo", "cfsInfo", "materialInfo"):
+        candidates = [
+            "boxsInfo", "boxInfo", "cfsInfo", "materialInfo", "cfs", "amsInfo", "materialBox",
+        ]
+        # Repli: n'importe quelle cle du payload dont le nom evoque un CFS,
+        # pour les firmwares dont on ne connait pas encore le nom exact.
+        candidates += [
+            key
+            for key in self._payload
+            if key not in candidates
+            and any(word in key.lower() for word in ("cfs", "materialbox", "boxinfo"))
+        ]
+        for key in candidates:
             payload = self._payload.get(key)
             if isinstance(payload, str):
                 try:
@@ -315,7 +327,17 @@ class CrealityLanTransport(PrinterTransport):
                     continue
             spools = parse_cfs_payload(payload)
             if spools:
+                if not self._cfs_logged:
+                    log.info("%s: CFS detecte via le champ '%s'", self.config.name, key)
+                    self._cfs_logged = True
                 return spools
+        if not self._cfs_logged:
+            log.info(
+                "%s: aucun CFS detecte dans les champs recus (%s)",
+                self.config.name,
+                ", ".join(sorted(self._payload)) or "aucun",
+            )
+            self._cfs_logged = True
         return []
 
     # ------------------------------------------------------------- commandes

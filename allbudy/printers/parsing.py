@@ -51,27 +51,63 @@ _SLOT_KEYS = ("materials", "slots", "filaments", "material", "spools")
 _UNIT_KEYS = ("boxs", "boxes", "units", "hubs", "cfs")
 
 
+def _as_entries(value: Any) -> list[tuple[Any, Any]]:
+    """Normalise une liste ou un dictionnaire d'emplacements en (cle, valeur).
+
+    Certains firmwares renvoient les emplacements sous forme de dictionnaire
+    indexe par numero de slot (`{"0": {...}, "1": {...}}`) plutot qu'en liste.
+    """
+    if isinstance(value, list):
+        return list(enumerate(value))
+    if isinstance(value, dict):
+        return list(value.items())
+    return []
+
+
 def parse_slots(slots: Any, unit: int) -> list[SpoolState]:
     out: list[SpoolState] = []
-    if not isinstance(slots, list):
-        return out
-    for slot_index, slot in enumerate(slots):
+    entries = _as_entries(slots)
+    for slot_index, slot in entries:
         if not isinstance(slot, dict):
             continue
         index = slot.get("id", slot.get("slot", slot.get("index", slot_index)))
         material = str(
-            slot.get("type") or slot.get("material") or slot.get("filament_type") or ""
+            slot.get("type")
+            or slot.get("material")
+            or slot.get("filament_type")
+            or slot.get("filament")
+            or ""
         ).strip()
         color = normalize_color(
-            slot.get("color") or slot.get("rgb") or slot.get("colour") or slot.get("color_hex")
+            slot.get("color")
+            or slot.get("rgb")
+            or slot.get("colour")
+            or slot.get("color_hex")
+            or slot.get("filament_color")
+            or slot.get("hex")
         )
-        percent = slot.get("percent", slot.get("remain", slot.get("remaining")))
+        percent = next(
+            (
+                slot[key]
+                for key in ("percent", "remain", "remaining", "percentage", "remain_percent")
+                if key in slot
+            ),
+            None,
+        )
         state = str(slot.get("state", "")).lower()
+        # Signal booleen explicite de presence de filament, quand fourni.
+        # `is_empty` a une polarite opposee a `has_filament`/`loaded`.
+        empty_flag = (
+            slot.get("has_filament") is False
+            or slot.get("loaded") is False
+            or slot.get("is_empty") is True
+        )
         empty = (
             not material
             or material.lower() in ("empty", "none", "unknown")
             or state in ("empty", "none")
             or (isinstance(percent, (int, float)) and percent <= 0)
+            or empty_flag
         )
         out.append(
             SpoolState(
@@ -91,9 +127,12 @@ def parse_slots(slots: Any, unit: int) -> list[SpoolState]:
 def parse_cfs_payload(payload: Any) -> list[SpoolState]:
     """Normalise l'etat du CFS (Creality Filament System).
 
-    Accepte soit une liste de boitiers contenant des emplacements, soit une
-    liste plate d'emplacements.
+    Accepte une liste de boitiers contenant des emplacements, une liste
+    plate d'emplacements, ou directement une liste/dictionnaire d'emplacements
+    en entree (quand l'objet Klipper ne les encapsule sous aucune cle).
     """
+    if isinstance(payload, list):
+        return parse_slots(payload, 0)
     if not isinstance(payload, dict):
         return []
 
@@ -111,14 +150,14 @@ def parse_cfs_payload(payload: Any) -> list[SpoolState]:
                 continue
             slots: Any = None
             for key in _SLOT_KEYS:
-                if isinstance(unit.get(key), list):
+                if key in unit and isinstance(unit[key], (list, dict)):
                     slots = unit[key]
                     break
             unit_id = unit.get("id", unit.get("index", unit_index))
             spools.extend(parse_slots(slots, as_int(unit_id, unit_index)))
     else:
         for key in _SLOT_KEYS:
-            if isinstance(payload.get(key), list):
+            if key in payload and isinstance(payload[key], (list, dict)):
                 spools.extend(parse_slots(payload[key], 0))
                 break
 

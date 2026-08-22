@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
 from .api import auth, files, jobs, printers, spools, storage, system, ws
@@ -27,6 +28,23 @@ from .security import ensure_admin_user
 log = logging.getLogger("allbudy")
 
 WEB_DIR = Path(__file__).parent / "web"
+_NO_CACHE_EXEMPT_PREFIXES = ("/api/", "/ws", "/docs", "/redoc", "/openapi.json")
+
+
+class NoCacheStaticMiddleware(BaseHTTPMiddleware):
+    """Force la revalidation du HTML/JS/CSS statiques a chaque requete.
+
+    Sans cela, le navigateur peut continuer a executer une version perimee de
+    l'interface apres une mise a jour de l'image Docker (les fichiers sont
+    reconstruits mais un cache heuristique du navigateur peut les considerer
+    encore valides). Les reponses API ne sont pas concernees.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if not request.url.path.startswith(_NO_CACHE_EXEMPT_PREFIXES):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
 
 
 def configure_logging() -> None:
@@ -84,7 +102,13 @@ async def remote_sync_worker() -> None:
                 )
                 now = datetime.now(UTC)
                 for remote in storages:
-                    due = remote.last_sync is None or remote.last_sync + timedelta(
+                    last_sync = remote.last_sync
+                    # SQLite ne conserve pas le fuseau: une date relue revient
+                    # naive meme si la colonne est declaree timezone=True. On
+                    # la traite comme de l'UTC, ce qui est ce qu'on y ecrit.
+                    if last_sync is not None and last_sync.tzinfo is None:
+                        last_sync = last_sync.replace(tzinfo=UTC)
+                    due = last_sync is None or last_sync + timedelta(
                         seconds=remote.sync_interval
                     ) <= now
                     if not due:
@@ -148,6 +172,8 @@ def create_app() -> FastAPI:
     @app.exception_handler(PrinterError)
     async def printer_error_handler(_request: Request, exc: PrinterError) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    app.add_middleware(NoCacheStaticMiddleware)
 
     for module in (auth, system, printers, files, jobs, spools, storage):
         app.include_router(module.router)
