@@ -27,6 +27,11 @@ export function settingsView() {
         el('li', { html: '<strong>Firmware d\'origine sans Moonraker</strong> — utilisez le protocole <em>LAN Creality</em> (port 9999).' }),
       ]),
     ]),
+    el('div', { class: 'card' }, [
+      el('h3', { text: 'Mode kiosque' }),
+      el('p', { class: 'small muted', text: 'Une interface sobre, pensee pour une tablette montee pres d\'une imprimante: choisir un fichier a imprimer, et marquer un emplacement vide une fois la bobine retiree. S\'ouvre dans un nouvel onglet, independamment du reste de l\'application.' }),
+      el('a', { class: 'btn', href: '#/kiosk', target: '_blank', text: '📱 Ouvrir le mode kiosque' }),
+    ]),
     section('Depots distants', storageSettingsSection()),
     section('Journal', eventsSection),
   ]);

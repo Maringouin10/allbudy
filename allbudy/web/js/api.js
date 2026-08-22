@@ -98,6 +98,7 @@ export const api = {
   storages: () => request('GET', 'api/storage'),
   browseStorage: (id, path) =>
     request('GET', `api/storage/${id}/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  storageTree: (id, depth) => request('GET', `api/storage/${id}/tree${depth ? `?depth=${depth}` : ''}`),
   importFromStorage: (id, path) => request('POST', `api/storage/${id}/import`, { body: { path } }),
   events: (params = '') => request('GET', `api/system/events${params}`),
 };

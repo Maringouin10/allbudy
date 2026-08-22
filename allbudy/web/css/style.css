@@ -405,3 +405,50 @@ td.actions { text-align: right; white-space: nowrap; }
   .main { padding: 1rem; }
   .field-row { grid-template-columns: 1fr; }
 }
+
+/* ------------------------------------------------------------- mode kiosque */
+/* Interface sobre pour petit ecran: pas de barre laterale, cibles tactiles
+   larges, une seule action par carte. */
+.kiosk-mode #app { display: block; }
+.kiosk { min-height: 100vh; display: flex; flex-direction: column; }
+
+.kiosk-head {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .8rem 1.1rem; border-bottom: 1px solid var(--line); background: var(--bg-soft);
+  position: sticky; top: 0; z-index: 5;
+}
+.kiosk-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.kiosk-tab {
+  padding: .55rem 1rem; font-size: .95rem; border-radius: var(--radius-sm);
+  background: var(--panel); border: 1px solid var(--line); color: var(--text);
+}
+.kiosk-tab.active { background: var(--accent); border-color: var(--accent); color: #14161b; font-weight: 650; }
+
+.kiosk-content { padding: 1.1rem; flex: 1; overflow-y: auto; }
+.kiosk-group-title { margin: 1.2rem 0 .7rem; }
+.kiosk-group-title:first-child { margin-top: 0; }
+
+.kiosk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: .9rem; }
+.kiosk-tile {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 0; overflow: hidden; text-align: left; display: flex; flex-direction: column;
+  min-height: 44px;
+}
+.kiosk-tile-thumb { aspect-ratio: 1; background: var(--bg); display: flex; align-items: center; justify-content: center; }
+.kiosk-tile-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.kiosk-tile-thumb .ph { font-size: 2.4rem; opacity: .3; }
+.kiosk-tile-label { padding: .65rem .75rem; font-size: .92rem; font-weight: 600; }
+
+.kiosk-grid.spools { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.kiosk-spool {
+  display: flex; align-items: center; gap: .7rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .8rem .9rem; min-height: 44px;
+}
+.kiosk-spool.empty { opacity: .5; }
+.kiosk-spool-chip { width: 26px; height: 26px; border-radius: 7px; flex: none; background: var(--panel-2); border: 1px solid rgba(255,255,255,.2); }
+.kiosk-empty-btn {
+  padding: .6rem 1rem; font-size: .9rem; border-radius: var(--radius-sm);
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+}
+.kiosk-empty-btn:active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }

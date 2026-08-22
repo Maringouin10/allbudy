@@ -142,6 +142,13 @@ export function spoolsView() {
         el('div', { class: 'small muted', text: `unite ${spool.unit} · emplacement ${spool.slot}${percent != null ? ` · ${percent} % restant` : ''}` }),
       ]),
       spool.active ? el('span', { class: 'badge printing', text: 'chargee' }) : null,
+      el('button', {
+        class: 'sm', text: 'Vider', title: 'Marquer cet emplacement comme vide',
+        onClick: () => run(async () => {
+          await api.patch(`api/spools/${spool.id}`, { empty: true, active: false });
+          refresh();
+        }, 'Emplacement marque vide'),
+      }),
       ...actions,
     ]);
   }

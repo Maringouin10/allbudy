@@ -44,6 +44,10 @@ export function printerDetailView(printerId, navigate) {
       el('h1', { text: printer ? printer.name : `Imprimante #${id}` }),
       badge(state),
       el('div', { class: 'spacer' }),
+      el('a', {
+        class: 'btn', href: `#/kiosk/${id}`, target: '_blank',
+        title: 'Ouvrir le mode kiosque pour cette imprimante', text: '📱 Kiosque',
+      }),
       el('button', { text: 'Reconnecter', onClick: () => command('reconnect') }),
       el('button', {
         class: 'danger', text: 'Arret d\'urgence',
@@ -222,7 +226,7 @@ export function printerDetailView(printerId, navigate) {
     );
   }
 
-  function renderCfs() {
+  async function renderCfs() {
     const live = printerState(id);
     const spools = (live && live.status && live.status.spools) || [];
     const capabilities = (live && live.capabilities) || {};
@@ -234,8 +238,35 @@ export function printerDetailView(printerId, navigate) {
     if (!spools.length) {
       cfsCard.append(el('p', { class: 'small muted', style: 'margin-top:.5rem', text: 'Declarez les bobines montees depuis l\'ecran Filaments pour que la file d\'attente sache quoi envoyer ici, meme sans CFS detecte automatiquement.' }));
       cfsCard.append(el('button', { class: 'sm', text: 'Ouvrir Filaments', onClick: () => navigate('spools') }));
-    } else {
-      cfsCard.append(el('div', { class: 'small muted', style: 'margin-top:.5rem', text: 'Etat lu directement sur la machine et synchronise avec l\'inventaire.' }));
+      return;
+    }
+    cfsCard.append(el('div', { class: 'small muted', style: 'margin-top:.5rem', text: 'Etat lu directement sur la machine et synchronise avec l\'inventaire.' }));
+
+    // La charge temps reel ne porte pas l'id BDD de la bobine: on le retrouve
+    // via l'inventaire pour pouvoir agir (marquer un emplacement vide).
+    try {
+      const inventory = await api.spoolInventory();
+      const mine = inventory.find((group) => group.printer_id === id);
+      const loaded = (mine ? mine.spools : []).filter((spool) => !spool.empty);
+      if (loaded.length) {
+        const select = el('select', {}, loaded.map((spool) => el('option', {
+          value: spool.id,
+          text: `${spool.material} · ${spool.color_name || spool.color_hex} — unite ${spool.unit} · emplacement ${spool.slot}`,
+        })));
+        cfsCard.append(el('div', { class: 'row', style: 'margin-top:.6rem' }, [
+          select,
+          el('button', {
+            class: 'sm', text: 'Vider cet emplacement',
+            onClick: () => run(async () => {
+              await api.patch(`api/spools/${select.value}`, { empty: true, active: false });
+              renderCfs();
+            }, 'Emplacement marque vide'),
+          }),
+        ]));
+      }
+    } catch (error) {
+      // Pas grave: le panneau CFS reste utilisable sans cette action rapide.
+      console.warn('Inventaire des bobines indisponible', error);
     }
   }
 

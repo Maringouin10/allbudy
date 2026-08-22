@@ -4,6 +4,7 @@ import { connectSocket, on, state } from './store.js';
 import { clear, el, toastError } from './ui.js';
 import { dashboardView } from './views/dashboard.js';
 import { filesView } from './views/files.js';
+import { kioskView } from './views/kiosk.js';
 import { printerDetailView } from './views/printer.js';
 import { printersView } from './views/printers.js';
 import { queueView } from './views/queue.js';
@@ -28,6 +29,10 @@ let currentView = null;
 function currentRoute() {
   const hash = window.location.hash.replace(/^#\/?/, '');
   return hash || 'dashboard';
+}
+
+function isKioskRoute(route) {
+  return route.split('/')[0] === 'kiosk';
 }
 
 function navigate(route) {
@@ -89,6 +94,12 @@ function renderShell() {
   function render() {
     const route = currentRoute();
     const section = route.split('/')[0];
+    if (isKioskRoute(route)) {
+      // Le mode kiosque a son propre shell, sans barre laterale: on repart
+      // de zero plutot que de demonter celui-ci a chaud.
+      window.location.reload();
+      return;
+    }
     if (ROUTE_REDIRECTS[section]) {
       navigate(ROUTE_REDIRECTS[section]);
       return;
@@ -107,6 +118,41 @@ function renderShell() {
     } catch (error) {
       toastError(error);
       main.append(el('p', { text: 'Impossible d\'afficher cette page.' }));
+    }
+  }
+
+  window.addEventListener('hashchange', render);
+  render();
+}
+
+/**
+ * Shell minimal du mode kiosque: aucune barre laterale, aucun tableau de
+ * bord, juste la vue kiosque. Pense pour une tablette montee pres d'une
+ * imprimante, ouverte une fois pour toutes sur #/kiosk.
+ */
+function renderKioskShell() {
+  clear(app);
+  app.classList.add('kiosk-mode');
+  let currentView = null;
+
+  function render() {
+    const route = currentRoute();
+    if (!isKioskRoute(route)) {
+      // Sortie du mode kiosque: le shell normal doit se reconstruire.
+      window.location.reload();
+      return;
+    }
+    const [, printerId] = route.split('/');
+    if (currentView && typeof currentView.cleanup === 'function') {
+      currentView.cleanup();
+    }
+    clear(app);
+    try {
+      currentView = kioskView(printerId);
+      app.append(currentView);
+    } catch (error) {
+      toastError(error);
+      app.append(el('p', { text: 'Impossible d\'afficher le mode kiosque.' }));
     }
   }
 
@@ -133,8 +179,12 @@ async function start() {
   }
 
   connectSocket();
-  renderShell();
-  if (!window.location.hash) navigate('dashboard');
+  if (isKioskRoute(currentRoute())) {
+    renderKioskShell();
+  } else {
+    renderShell();
+    if (!window.location.hash) navigate('dashboard');
+  }
 }
 
 start();

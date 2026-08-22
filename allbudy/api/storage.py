@@ -15,6 +15,7 @@ from ..files.remotes import (
     RemoteError,
     import_entry,
     list_remote,
+    list_remote_tree,
     sync_storage,
     test_connection,
     upload_remote,
@@ -144,6 +145,21 @@ async def browse_storage(
         "path": path or storage.remote_path,
         "entries": [{**e.to_dict(), "imported": e.path in known} for e in entries],
     }
+
+
+@router.get("/{storage_id}/tree")
+async def browse_tree(
+    storage_id: int, depth: int = 3, session: AsyncSession = Depends(get_session)
+) -> dict[str, Any]:
+    """Arborescence des sous-dossiers, pour lister directement les dossiers
+    profonds dans la barre laterale de l'ecran Fichiers plutot que de les
+    ouvrir un par un."""
+    storage = await _get_storage(session, storage_id)
+    depth = max(1, min(depth, 4))
+    try:
+        return await list_remote_tree(storage, depth)
+    except RemoteError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/{storage_id}/sync")

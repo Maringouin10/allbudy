@@ -26,6 +26,10 @@ log = logging.getLogger("allbudy.remotes")
 
 CONNECT_TIMEOUT = 15
 
+#: Garde-fou pour l'arborescence recursive du panneau lateral: un NAS avec des
+#: milliers de dossiers ne doit ni bloquer l'UI ni marteler le serveur.
+MAX_TREE_NODES = 400
+
 
 class RemoteError(RuntimeError):
     """Echec de dialogue avec un depot distant."""
@@ -123,6 +127,40 @@ def _ftp_list(storage: RemoteStorage, path: str) -> list[RemoteEntry]:
             client.close()
 
 
+def _ftp_list_tree(storage: RemoteStorage, root: str, depth: int) -> dict[str, Any]:
+    """Sous-dossiers jusqu'a `depth` niveaux, une seule connexion reutilisee."""
+    client = _ftp_connect(storage)
+    budget = [MAX_TREE_NODES]
+
+    def walk(path: str, remaining: int) -> list[dict[str, Any]]:
+        if remaining <= 0 or budget[0] <= 0:
+            return []
+        try:
+            client.cwd(path or "/")
+            raw = list(client.mlsd())
+        except ftplib.all_errors:
+            return []
+        children: list[dict[str, Any]] = []
+        for name, facts in raw:
+            if name in (".", "..") or facts.get("type") != "dir" or budget[0] <= 0:
+                continue
+            budget[0] -= 1
+            child_path = _join(path, name)
+            children.append(
+                {"name": name, "path": child_path, "children": walk(child_path, remaining - 1)}
+            )
+        children.sort(key=lambda c: c["name"].lower())
+        return children
+
+    try:
+        return {"path": root, "children": walk(root, depth)}
+    finally:
+        try:
+            client.quit()
+        except ftplib.all_errors:  # pragma: no cover - fermeture best-effort
+            client.close()
+
+
 def _ftp_download(storage: RemoteStorage, remote_path: str, destination: Path) -> None:
     client = _ftp_connect(storage)
     try:
@@ -189,6 +227,40 @@ def _sftp_list(storage: RemoteStorage, path: str) -> list[RemoteEntry]:
         client.close()
 
 
+def _sftp_list_tree(storage: RemoteStorage, root: str, depth: int) -> dict[str, Any]:
+    """Sous-dossiers jusqu'a `depth` niveaux, une seule connexion reutilisee."""
+    client, sftp = _sftp_client(storage)
+    budget = [MAX_TREE_NODES]
+
+    def walk(path: str, remaining: int) -> list[dict[str, Any]]:
+        if remaining <= 0 or budget[0] <= 0:
+            return []
+        try:
+            attrs = sftp.listdir_attr(path or "/")
+        except OSError:
+            return []
+        children: list[dict[str, Any]] = []
+        for attr in attrs:
+            is_dir = bool(attr.st_mode and stat.S_ISDIR(attr.st_mode))
+            if not is_dir or budget[0] <= 0:
+                continue
+            budget[0] -= 1
+            child_path = _join(path, attr.filename)
+            children.append({
+                "name": attr.filename,
+                "path": child_path,
+                "children": walk(child_path, remaining - 1),
+            })
+        children.sort(key=lambda c: c["name"].lower())
+        return children
+
+    try:
+        return {"path": root, "children": walk(root, depth)}
+    finally:
+        sftp.close()
+        client.close()
+
+
 def _sftp_download(storage: RemoteStorage, remote_path: str, destination: Path) -> None:
     client, sftp = _sftp_client(storage)
     try:
@@ -214,6 +286,12 @@ _DISPATCH = {
     StorageKind.SFTP.value: (_sftp_list, _sftp_download, _sftp_upload),
 }
 
+_TREE_DISPATCH = {
+    StorageKind.FTP.value: _ftp_list_tree,
+    StorageKind.FTPS.value: _ftp_list_tree,
+    StorageKind.SFTP.value: _sftp_list_tree,
+}
+
 
 def _dispatch(storage: RemoteStorage):
     handlers = _DISPATCH.get(storage.kind)
@@ -228,6 +306,23 @@ async def list_remote(storage: RemoteStorage, path: str | None = None) -> list[R
     try:
         return await asyncio.to_thread(list_fn, storage, target)
     except Exception as exc:  # noqa: BLE001 - remonte une erreur unifiee a l'API
+        raise RemoteError(f"Listing impossible ({storage.name}): {exc}") from exc
+
+
+async def list_remote_tree(storage: RemoteStorage, depth: int = 3) -> dict[str, Any]:
+    """Sous-dossiers du depot jusqu'a `depth` niveaux, pour la barre laterale.
+
+    Une seule connexion est ouverte pour toute la marche recursive (voir
+    `_ftp_list_tree`/`_sftp_list_tree`): a l'inverse d'appeler `list_remote`
+    en boucle, on n'ouvre pas une connexion par dossier visite.
+    """
+    tree_fn = _TREE_DISPATCH.get(storage.kind)
+    if tree_fn is None:
+        raise RemoteError(f"Type de depot inconnu: {storage.kind}")
+    root = storage.remote_path or "/"
+    try:
+        return await asyncio.to_thread(tree_fn, storage, root, depth)
+    except Exception as exc:  # noqa: BLE001
         raise RemoteError(f"Listing impossible ({storage.name}): {exc}") from exc
 
 

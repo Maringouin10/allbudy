@@ -54,24 +54,48 @@ export function filesView() {
   /** Barre laterale « sources »: bibliotheque locale + depots distants (a la Bambuddy). */
   let storages = [];
   let activeSource = 'library';
+  let activePath = null;
+  // Arborescence pre-chargee de chaque depot (2-3 niveaux): les sous-dossiers
+  // profonds sont donc directement cliquables depuis la barre laterale, sans
+  // ouvrir les dossiers intermediaires un par un.
+  const storageTrees = new Map();
   const sourceList = el('div', { class: 'col', style: 'gap:.2rem' });
 
-  function sourceButton(key, icon, label) {
-    const active = activeSource === key;
+  function sourceButton(key, icon, label, { active, indent = 0, onClick } = {}) {
     return el('button', {
       class: 'sm ghost',
-      style: `justify-content:flex-start;width:100%;text-align:left;${active ? 'background:var(--accent-soft);color:var(--accent);font-weight:600' : ''}`,
-      onClick: () => {
-        if (key === 'library') showLibrary();
-        else showStorage(storages.find((s) => s.id === key));
-      },
+      style: `justify-content:flex-start;width:100%;text-align:left;padding-left:${0.6 + indent * 0.9}rem;${active ? 'background:var(--accent-soft);color:var(--accent);font-weight:600' : ''}`,
+      onClick,
     }, [`${icon} ${label}`]);
+  }
+
+  function folderButtons(storage, node, depth) {
+    const buttons = [];
+    for (const child of node.children || []) {
+      buttons.push(sourceButton(child.path, '📁', child.name, {
+        active: activeSource === storage.id && activePath === child.path,
+        indent: depth,
+        onClick: () => showStorage(storage, child.path),
+      }));
+      buttons.push(...folderButtons(storage, child, depth + 1));
+    }
+    return buttons;
   }
 
   function renderSidebar() {
     clear(sourceList);
-    sourceList.append(sourceButton('library', '📂', 'Bibliotheque'));
-    for (const storage of storages) sourceList.append(sourceButton(storage.id, '🗄', storage.name));
+    sourceList.append(sourceButton('library', '📂', 'Bibliotheque', {
+      active: activeSource === 'library',
+      onClick: showLibrary,
+    }));
+    for (const storage of storages) {
+      sourceList.append(sourceButton(storage.id, '🗄', storage.name, {
+        active: activeSource === storage.id && !activePath,
+        onClick: () => showStorage(storage),
+      }));
+      const tree = storageTrees.get(storage.id);
+      if (tree) for (const button of folderButtons(storage, tree, 1)) sourceList.append(button);
+    }
   }
 
   async function loadStorages() {
@@ -80,11 +104,24 @@ export function filesView() {
       renderSidebar();
     } catch (error) {
       console.warn('Depots distants indisponibles', error);
+      return;
     }
+    // Chaque arborescence se charge independamment: un depot injoignable ne
+    // doit pas retarder l'affichage des autres.
+    await Promise.all(storages.map(async (storage) => {
+      try {
+        storageTrees.set(storage.id, await api.storageTree(storage.id, 3));
+      } catch (error) {
+        console.warn(`Arborescence indisponible pour ${storage.name}`, error);
+      } finally {
+        renderSidebar();
+      }
+    }));
   }
 
   function showLibrary() {
     activeSource = 'library';
+    activePath = null;
     renderSidebar();
     libraryPane.style.display = '';
     browsePane.style.display = 'none';
@@ -93,6 +130,7 @@ export function filesView() {
   function showStorage(storage, path) {
     if (!storage) return;
     activeSource = storage.id;
+    activePath = path || null;
     renderSidebar();
     libraryPane.style.display = 'none';
     browsePane.style.display = '';
@@ -125,6 +163,8 @@ export function filesView() {
     );
     try {
       const data = await api.browseStorage(storage.id, path);
+      activePath = data.path === (storage.remote_path || '/') ? null : data.path;
+      renderSidebar();
       const card = el('div', { class: 'col' });
       card.append(breadcrumb(storage, data.path));
       if (!data.entries.length) {
