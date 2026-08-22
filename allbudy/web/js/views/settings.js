@@ -1,15 +1,12 @@
 /** Reglages de l'instance. */
-import { api, setToken } from '../api.js';
-import { state } from '../store.js';
-import { clear, el, field, formatBytes, formatDuration, run, toast, toastError } from '../ui.js';
+import { api } from '../api.js';
+import { clear, el, formatBytes, formatDuration, toastError } from '../ui.js';
 
 export function settingsView() {
-  const accountCard = el('div', { class: 'card' });
   const systemCard = el('div', { class: 'card' });
 
   const root = el('div', {}, [
     el('div', { class: 'page-head' }, [el('h1', { text: 'Reglages' })]),
-    accountCard,
     systemCard,
     el('div', { class: 'card' }, [
       el('h3', { text: 'Mode LAN Creality' }),
@@ -21,47 +18,6 @@ export function settingsView() {
       ]),
     ]),
   ]);
-
-  function renderAccount() {
-    clear(accountCard).append(el('h3', { text: 'Compte' }));
-    if (!state.info || !state.info.auth_enabled) {
-      accountCard.append(el('p', { class: 'small muted', text: 'Authentification desactivee sur cette instance (ALLBUDY_AUTH_ENABLED=false).' }));
-      return;
-    }
-    const current = el('input', { type: 'password' });
-    const next = el('input', { type: 'password' });
-    const confirm = el('input', { type: 'password' });
-    accountCard.append(
-      el('p', { class: 'small muted', text: `Connecte en tant que ${state.user ? state.user.username : '—'}.` }),
-      field('Mot de passe actuel', current),
-      el('div', { class: 'field-row' }, [
-        field('Nouveau mot de passe', next),
-        field('Confirmation', confirm),
-      ]),
-      el('div', { class: 'row' }, [
-        el('button', {
-          class: 'primary', text: 'Changer le mot de passe',
-          onClick: async () => {
-            if (next.value.length < 6) return toast('6 caracteres minimum', 'warn');
-            if (next.value !== confirm.value) return toast('Les deux saisies different', 'warn');
-            const result = await run(() => api.post('api/auth/password', {
-              current_password: current.value, new_password: next.value,
-            }));
-            if (result) { current.value = next.value = confirm.value = ''; }
-            return null;
-          },
-        }),
-        el('button', {
-          text: 'Se deconnecter',
-          onClick: async () => {
-            await api.post('api/auth/logout').catch(() => {});
-            setToken('');
-            window.location.reload();
-          },
-        }),
-      ]),
-    );
-  }
 
   async function renderSystem() {
     clear(systemCard).append(el('h3', { text: 'Systeme' }));
@@ -90,7 +46,6 @@ export function settingsView() {
     }
   }
 
-  renderAccount();
   renderSystem();
   return root;
 }

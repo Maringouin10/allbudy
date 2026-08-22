@@ -32,7 +32,11 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest_asyncio.fixture
 async def client(data_dir: Path):
-    """Client HTTP branche sur l'app ASGI, avec cycle de vie complet."""
+    """Client HTTP branche sur l'app ASGI, avec cycle de vie complet.
+
+    Porte un jeton valide meme si l'authentification est desactivee (le cas
+    par defaut du produit): les appels marchent dans les deux configurations.
+    """
     import httpx
 
     from allbudy.main import create_app
@@ -49,6 +53,27 @@ async def client(data_dir: Path):
             assert response.status_code == 200, response.text
             http.headers["Authorization"] = f"Bearer {response.json()['access_token']}"
             yield http
+
+
+@pytest_asyncio.fixture
+async def client_auth_enabled(data_dir: Path, monkeypatch: pytest.MonkeyPatch):
+    """Client sur une instance ou l'authentification est explicitement activee."""
+    import httpx
+
+    from allbudy.config import get_settings
+    from allbudy.main import create_app
+
+    monkeypatch.setenv("ALLBUDY_AUTH_ENABLED", "true")
+    get_settings.cache_clear()
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test", timeout=30
+        ) as http:
+            yield http
+    get_settings.cache_clear()
 
 
 @pytest_asyncio.fixture
@@ -75,7 +100,11 @@ def _connected(printer_id: int) -> bool:
     from allbudy.printers.manager import manager
 
     runtime = manager.get(printer_id)
-    return bool(runtime and runtime.connected)
+    # `connected` flips true right after transport.connect(), before the
+    # first refresh() populates `status`: wait for that too, otherwise a
+    # test can observe a "connected" printer still reporting the default
+    # offline status (and so, wrongly, not free).
+    return bool(runtime and runtime.connected and runtime.status.online)
 
 
 async def wait_until(predicate, timeout: float = 10.0, interval: float = 0.15):

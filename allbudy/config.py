@@ -31,7 +31,12 @@ class Settings(BaseSettings):
     Generee et persistee dans data_dir/secret.key si absente.
     """
     session_ttl_hours: int = 24 * 14
-    auth_enabled: bool = True
+    auth_enabled: bool = False
+    """Desactive par defaut: AllBudy est concu pour un reseau local deja
+    cloisonne. Activez-le (et protegez l'acces reseau en consequence) si
+    l'instance est exposee au-dela de ce reseau; l'interface fournie n'a
+    plus d'ecran de connexion, l'activer suppose de gerer l'authentification
+    autrement (reverse proxy, jeton passe a la main)."""
     admin_username: str = "admin"
     admin_password: str = "allbudy"
     """Identifiants du compte cree au premier demarrage uniquement."""

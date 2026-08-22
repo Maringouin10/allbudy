@@ -104,8 +104,10 @@ cd allbudy
 docker compose up -d
 ```
 
-L'interface est sur `http://<adresse-du-serveur>:8088` — identifiants par défaut
-`admin` / `allbudy`, **à changer dès la première connexion** (Réglages → Compte).
+L'interface est sur `http://<adresse-du-serveur>:8088` — aucun identifiant à
+saisir : AllBudy est conçu pour un réseau local déjà cloisonné. Si l'instance
+doit être exposée au-delà, voir [Configuration](#configuration) pour activer
+l'authentification.
 
 > **Découverte réseau et Docker.** En mode `bridge` (le défaut), le conteneur ne voit
 > que le réseau Docker : le balayage automatique ne trouvera rien. Sur Linux et
@@ -216,8 +218,7 @@ Tout passe par des variables d'environnement préfixées `ALLBUDY_` (ou un fichi
 |---|---|---|
 | `ALLBUDY_PORT` | `8088` | Port d'écoute |
 | `ALLBUDY_DATA_DIR` | `./data` | Base, fichiers, miniatures, clé secrète |
-| `ALLBUDY_AUTH_ENABLED` | `true` | Mettre à `false` sur un réseau déjà cloisonné |
-| `ALLBUDY_ADMIN_PASSWORD` | `allbudy` | Mot de passe initial (premier démarrage seulement) |
+| `ALLBUDY_AUTH_ENABLED` | `false` | Mettre à `true` si l'instance sort du réseau local (pas d'écran de connexion fourni : prévoir un reverse proxy) |
 | `ALLBUDY_POLL_INTERVAL` | `2.0` | Rythme d'interrogation des machines (s) |
 | `ALLBUDY_SCHEDULER_INTERVAL` | `5.0` | Rythme du dispatcher (s) |
 | `ALLBUDY_MAX_UPLOAD_MB` | `512` | Taille maximale d'un fichier |
@@ -236,22 +237,19 @@ Toute l'interface repose sur une API REST documentée automatiquement :
 `http://<serveur>:8088/docs`.
 
 ```bash
-# Connexion
-TOKEN=$(curl -s -X POST localhost:8088/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"allbudy"}' | jq -r .access_token)
-
 # Envoyer un fichier et le mettre en file
-FILE_ID=$(curl -s -X POST localhost:8088/api/files \
-  -H "Authorization: Bearer $TOKEN" -F file=@piece.gcode | jq .file.id)
+FILE_ID=$(curl -s -X POST localhost:8088/api/files -F file=@piece.gcode | jq .file.id)
 
-curl -s -X POST localhost:8088/api/jobs \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+curl -s -X POST localhost:8088/api/jobs -H 'Content-Type: application/json' \
   -d "{\"file_id\": $FILE_ID, \"required_material\": \"PLA\", \"required_color\": \"#E74C3C\"}"
 
 # État du parc
-curl -s localhost:8088/api/printers/status -H "Authorization: Bearer $TOKEN"
+curl -s localhost:8088/api/printers/status
 ```
+
+Si `ALLBUDY_AUTH_ENABLED=true` est activé, ajoutez d'abord un jeton :
+`curl -X POST localhost:8088/api/auth/login -d '{"username":"admin","password":"..."}'`
+puis `-H "Authorization: Bearer $TOKEN"` sur chaque appel.
 
 Le WebSocket `/ws` pousse l'état des imprimantes et les événements ; il envoie un
 instantané complet à la connexion.

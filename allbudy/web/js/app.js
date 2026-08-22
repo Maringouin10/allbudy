@@ -1,7 +1,7 @@
-/** Shell de l'application: authentification, navigation, routage par hash. */
-import { api, setToken } from './api.js';
-import { connectSocket, disconnectSocket, on, state } from './store.js';
-import { clear, el, field, toast, toastError } from './ui.js';
+/** Shell de l'application: navigation et routage par hash. */
+import { api } from './api.js';
+import { connectSocket, on, state } from './store.js';
+import { clear, el, toastError } from './ui.js';
 import { dashboardView } from './views/dashboard.js';
 import { eventsView } from './views/events.js';
 import { filesView } from './views/files.js';
@@ -113,43 +113,6 @@ function renderShell() {
   render();
 }
 
-function renderLogin() {
-  clear(app);
-  const username = el('input', { value: 'admin', autocomplete: 'username' });
-  const password = el('input', { type: 'password', autocomplete: 'current-password' });
-  const error = el('div', { class: 'small', style: 'color:var(--err);min-height:1.2em' });
-
-  const submit = async () => {
-    error.textContent = '';
-    try {
-      const result = await api.login(username.value, password.value);
-      setToken(result.access_token);
-      await start();
-    } catch (exception) {
-      error.textContent = exception.message;
-    }
-  };
-
-  for (const input of [username, password]) {
-    input.addEventListener('keydown', (event) => { if (event.key === 'Enter') submit(); });
-  }
-
-  app.append(el('div', { class: 'login-wrap' }, [
-    el('div', { class: 'card login-box' }, [
-      el('div', { class: 'brand', style: 'justify-content:center' }, [
-        el('span', { class: 'dot' }),
-        el('div', {}, ['AllBudy', el('small', { text: 'Ferme d\'impression Creality' })]),
-      ]),
-      field('Identifiant', username),
-      field('Mot de passe', password),
-      error,
-      el('button', { class: 'primary', style: 'width:100%', text: 'Se connecter', onClick: submit }),
-      el('p', { class: 'small muted', style: 'margin-top:1rem;text-align:center', text: 'Identifiants par defaut: admin / allbudy' }),
-    ]),
-  ]));
-  password.focus();
-}
-
 async function start() {
   try {
     state.info = await api.info();
@@ -158,13 +121,13 @@ async function start() {
     return;
   }
 
+  // Sans authentification, l'API renvoie un compte local implicite: aucun
+  // ecran de connexion n'est necessaire pour une instance sur reseau local.
   if (state.info.auth_enabled) {
     try {
       state.user = await api.me();
-    } catch {
-      disconnectSocket();
-      renderLogin();
-      return;
+    } catch (error) {
+      toastError(error);
     }
   }
 
@@ -172,11 +135,5 @@ async function start() {
   renderShell();
   if (!window.location.hash) navigate('dashboard');
 }
-
-window.addEventListener('allbudy:unauthorized', () => {
-  disconnectSocket();
-  renderLogin();
-  toast('Session expiree, reconnectez-vous', 'warn');
-});
 
 start();

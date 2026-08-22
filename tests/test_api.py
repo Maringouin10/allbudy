@@ -25,9 +25,32 @@ async def test_login_invalide(client):
     assert response.status_code == 401
 
 
-async def test_endpoint_protege_sans_jeton(client):
-    response = await client.get("/api/printers", headers={"Authorization": "Bearer nimporte-quoi"})
-    assert response.status_code == 401
+async def test_api_ouverte_sans_authentification_par_defaut(client):
+    """AllBudy est concu pour un reseau local: pas de jeton exige par defaut."""
+    response = await client.get("/api/printers", headers={"Authorization": ""})
+    assert response.status_code == 200
+
+
+async def test_authentification_activable(client_auth_enabled):
+    """Avec ALLBUDY_AUTH_ENABLED=true, la protection redevient effective."""
+    sans_jeton = await client_auth_enabled.get("/api/printers")
+    assert sans_jeton.status_code == 401
+
+    jeton_invalide = await client_auth_enabled.get(
+        "/api/printers", headers={"Authorization": "Bearer nimporte-quoi"}
+    )
+    assert jeton_invalide.status_code == 401
+
+    connexion = await client_auth_enabled.post(
+        "/api/auth/login", json={"username": "admin", "password": "motdepasse-test"}
+    )
+    assert connexion.status_code == 200
+    token = connexion.json()["access_token"]
+
+    avec_jeton = await client_auth_enabled.get(
+        "/api/printers", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert avec_jeton.status_code == 200
 
 
 async def test_info_est_public(client):
@@ -355,3 +378,57 @@ async def test_websocket_pousse_les_etats(client, simulator):
         assert message["type"] == "test.event"
     finally:
         await bus.unsubscribe(queue)
+
+
+async def test_stats_imprimantes_libres_et_pieces(client, simulator):
+    """Le tableau de bord compte les machines disponibles et les pieces sorties."""
+    from allbudy.printers.manager import manager
+
+    stats = (await client.get("/api/system/stats")).json()
+    assert stats["printers"]["free"] == 1
+    assert stats["jobs"]["pieces_7d"] == 0
+
+    # Un plateau de 3 pieces, imprime une fois -> 3 pieces au compteur.
+    gcode = make_gcode(material="PLA", color="#E74C3C") + (
+        "\nEXCLUDE_OBJECT_DEFINE NAME=A\nEXCLUDE_OBJECT_DEFINE NAME=B\n"
+        "EXCLUDE_OBJECT_DEFINE NAME=C\n"
+    )
+    response = await client.post(
+        "/api/files", files={"file": ("trois.gcode", gcode.encode(), "text/plain")}
+    )
+    file = response.json()["file"]
+    assert file["meta"]["object_count"] == 3
+
+    await wait_until(lambda: _inventory_ready(client, simulator["id"]), timeout=10)
+    manager.get(simulator["id"]).transport.set_print_duration(2)
+    job = (await client.post("/api/jobs", json={"file_id": file["id"]})).json()
+
+    # Pendant l'impression, la machine n'est plus comptee comme libre. Le compte
+    # vient du cache d'etat du parc, rafraichi par la boucle d'interrogation:
+    # il peut accuser un intervalle de retard sur le statut du travail.
+    await wait_until(lambda: _job_status(client, job["id"], {"printing"}), timeout=15)
+    await wait_until(lambda: _free_printers(client, 0), timeout=10)
+
+    await wait_until(lambda: _job_status(client, job["id"], {"completed"}), timeout=25)
+    done = (await client.get("/api/system/stats")).json()
+    assert done["jobs"]["completed_7d"] == 1
+    assert done["jobs"]["pieces_7d"] == 3
+
+
+async def test_ventilateurs_exposes_dans_letat(client, simulator):
+    status = (await client.get(f"/api/printers/{simulator['id']}/status")).json()
+    fans = status["status"]["fans"]
+    assert [fan["label"] for fan in fans] == ["Piece", "Auxiliaire", "Chambre", "Tete"]
+    assert fans[0]["controllable"] is True
+    # Le ventilateur de tete est en lecture seule.
+    assert fans[-1]["controllable"] is False
+
+    response = await client.post(
+        f"/api/printers/{simulator['id']}/fan", json={"fan": "part", "speed": 80}
+    )
+    assert response.status_code == 200
+
+
+async def _free_printers(client, expected: int):
+    stats = (await client.get("/api/system/stats")).json()
+    return stats["printers"]["free"] == expected

@@ -19,9 +19,10 @@ services:
       - allbudy-data:/data
 
     environment:
-      # Identifiants du premier demarrage (a changer depuis l'interface ensuite).
-      ALLBUDY_ADMIN_USERNAME: admin
-      ALLBUDY_ADMIN_PASSWORD: allbudy
+      # AllBudy est concu pour un reseau local deja cloisonne: pas d'ecran de
+      # connexion par defaut. Pour l'exposer au-dela, decommentez la ligne
+      # suivante et protegez l'acces autrement (reverse proxy, VPN...).
+      # ALLBUDY_AUTH_ENABLED: "true"
       # Rythme d'interrogation des machines, en secondes.
       ALLBUDY_POLL_INTERVAL: "2.0"
       ALLBUDY_MAX_UPLOAD_MB: "512"
